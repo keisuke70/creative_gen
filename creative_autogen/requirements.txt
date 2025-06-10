@@ -1,0 +1,7 @@
+openai>=1.0.0
+beautifulsoup4
+pillow
+pinecone-client
+google-cloud-vision
+requests
+pyyaml
