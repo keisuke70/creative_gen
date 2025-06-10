@@ -1,5 +1,8 @@
 import os
 import openai
+from dotenv import load_dotenv
+
+load_dotenv()
 
 
 def generate_copy(summary: str, n: int = 3) -> list:

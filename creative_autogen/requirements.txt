@@ -5,3 +5,5 @@ pinecone-client
 google-cloud-vision
 requests
 pyyaml
+
+python-dotenv

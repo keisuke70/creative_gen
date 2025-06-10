@@ -1,5 +1,8 @@
 """Simple wrapper around Pinecone (placeholder)."""
 import os
+from dotenv import load_dotenv
+
+load_dotenv()
 try:
     import pinecone
 except Exception:  # if pinecone is not installed

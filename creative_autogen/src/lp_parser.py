@@ -3,6 +3,9 @@ import requests
 from bs4 import BeautifulSoup
 
 import openai
+from dotenv import load_dotenv
+
+load_dotenv()
 
 
 def parse_lp(url: str) -> str:

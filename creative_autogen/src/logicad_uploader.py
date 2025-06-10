@@ -2,6 +2,9 @@ import os
 import json
 import zipfile
 import requests
+from dotenv import load_dotenv
+
+load_dotenv()
 
 
 LOGICAD_ENDPOINT = 'https://logicad.example.com/v1/upload'

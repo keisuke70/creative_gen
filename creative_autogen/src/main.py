@@ -3,6 +3,8 @@ import json
 import zipfile
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 from .lp_parser import parse_lp
 from .copy_generator import generate_copy
 from .image_fetcher import fetch_product_image
@@ -30,6 +32,7 @@ def pipeline(lp_url: str, strategy: str, dry_run: bool):
 
 
 def main():
+    load_dotenv()
     parser = argparse.ArgumentParser(description='Generate creatives from LP URL')
     parser.add_argument('url')
     parser.add_argument('--strategy', default='layer')
