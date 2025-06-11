@@ -26,15 +26,43 @@ Auto-Select or Manual Choice → Single AI Generation (Complete Creative) → Ou
 
 ## 📦 Installation
 
+> **⚠️ IMPORTANT**: The web app requires a Python virtual environment. You **MUST** activate the venv before running the web server or you'll get "module not found" errors.
+
+### **Prerequisites**
+- Python 3.8 or higher
+- OpenAI API key with GPT Image 1 access
+
+### **Step 1: Virtual Environment Setup**
 ```bash
-# Install dependencies
+# Navigate to banner_maker directory (parent of web_app)
+cd banner_maker
+
+# Create virtual environment
+python3 -m venv banner_maker_env
+
+# Activate virtual environment (Linux/Mac)
+source banner_maker_env/bin/activate
+
+# Or on Windows
+# banner_maker_env\Scripts\activate
+```
+
+### **Step 2: Install Dependencies**
+```bash
+# Upgrade pip and install Python packages
+python3 -m pip install --upgrade pip
 pip install -r requirements.txt
 
-# Install Playwright browser
+# Install Playwright browser (IMPORTANT: do this inside venv)
 playwright install chromium
+```
 
-# Set environment variables
-export OPENAI_API_KEY="your-openai-api-key"
+### **Step 3: Environment Variables**
+```bash
+# Create .env file in banner_maker directory
+cat > .env << 'EOF'
+OPENAI_API_KEY='sk-proj-your-openai-key-here'
+EOF
 ```
 
 ## 🔧 Configuration
@@ -55,14 +83,31 @@ MAX_CONTENT_LENGTH=16777216  # 16MB file upload limit
 
 ### **Development Mode**
 ```bash
+# IMPORTANT: Make sure virtual environment is activated
+source banner_maker_env/bin/activate  # Linux/Mac
+# or: banner_maker_env\Scripts\activate  # Windows
+
+# Navigate to web app directory
 cd web_app
+
+# Start the web server
 python run.py
 ```
 Access at: http://localhost:5000
 
+### **Quick Start Script**
+```bash
+# Use the provided start script (auto-activates venv)
+./start_web_app.sh
+```
+
 ### **Production Mode**
 ```bash
+# IMPORTANT: Make sure virtual environment is activated first
+source banner_maker_env/bin/activate  # Linux/Mac
+
 export FLASK_ENV=production
+cd web_app
 gunicorn -w 4 -b 0.0.0.0:5000 app:app
 ```
 
@@ -213,6 +258,15 @@ curl http://localhost:5000/api/status/{session_id}
 - API response times vary (15-60s is normal)
 - Check network connectivity
 - Monitor API usage limits
+
+**"Module not found" errors**
+- Ensure virtual environment is activated: `source banner_maker_env/bin/activate`
+- Verify you're in the correct directory (banner_maker)
+- Reinstall dependencies: `pip install -r requirements.txt`
+
+**"Playwright browser not found"**
+- Activate venv first, then run: `playwright install chromium`
+- Browser must be installed inside the virtual environment
 
 ### **Debug Mode**
 ```bash
