@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Banner Maker - Create Professional Marketing Banners</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <style>
+        .gradient-bg {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+        .glass-effect {
+            backdrop-filter: blur(10px);
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        .progress-bar {
+            transition: width 0.3s ease-in-out;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <!-- Header -->
+    <header class="gradient-bg text-white py-6">
+        <div class="container mx-auto px-4">
+            <div class="flex items-center justify-between">
+                <div>
+                    <h1 class="text-3xl font-bold flex items-center">
+                        <i class="fas fa-magic mr-3"></i>
+                        AI Banner Maker
+                    </h1>
+                    <p class="text-blue-100 mt-2">Create stunning marketing banners with AI</p>
+                </div>
+                <div class="hidden md:block">
+                    <div class="flex items-center space-x-4 text-sm">
+                        <div class="flex items-center">
+                            <i class="fas fa-robot mr-2"></i>
+                            <span>GPT Image 1</span>
+                        </div>
+                        <div class="flex items-center">
+                            <i class="fas fa-eye mr-2"></i>
+                            <span>Google Vision</span>
+                        </div>
+                        <div class="flex items-center">
+                            <i class="fas fa-brain mr-2"></i>
+                            <span>GPT-4.1 mini</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="container mx-auto px-4 py-8">
+        <div class="max-w-4xl mx-auto">
+            
+            <!-- AI Banner Generation -->
+            <div class="mb-8 text-center">
+                <h2 class="text-3xl font-bold text-gray-800 mb-4">
+                    <i class="fas fa-wand-magic-sparkles text-purple-500 mr-3"></i>
+                    AI Banner Generation
+                </h2>
+                <p class="text-lg text-gray-600 max-w-2xl mx-auto">
+                    Generate complete marketing banners with text, layout, and styling in a single AI generation. 
+                    Upload your product image or let our AI create everything from your landing page content.
+                </p>
+            </div>
+
+            <!-- Banner Creation Form -->
+            <div class="bg-white rounded-lg shadow-lg p-6">
+                <h2 class="text-2xl font-bold text-gray-800 mb-6">Create Your Banner</h2>
+                
+                <form id="bannerForm" class="space-y-6">
+                    
+                    <!-- Landing Page URL -->
+                    <div>
+                        <label for="url" class="block text-sm font-medium text-gray-700 mb-2">
+                            <i class="fas fa-link mr-2"></i>Landing Page URL
+                        </label>
+                        <input type="url" id="url" name="url" required 
+                               class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                               placeholder="https://example.com/your-landing-page">
+                        <p class="text-sm text-gray-500 mt-1">We'll extract content and images from this page</p>
+                    </div>
+
+                    <!-- Product Image Upload (Optional) -->
+                    <div>
+                        <label for="productImage" class="block text-sm font-medium text-gray-700 mb-2">
+                            <i class="fas fa-image mr-2"></i>Product Image (Optional)
+                        </label>
+                        <div class="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:border-blue-400 transition-colors">
+                            <input type="file" id="productImage" name="productImage" accept="image/*" class="hidden">
+                            <div id="uploadArea" class="cursor-pointer">
+                                <i class="fas fa-cloud-upload-alt text-4xl text-gray-400 mb-3"></i>
+                                <p class="text-gray-600">Click to upload or drag and drop</p>
+                                <p class="text-sm text-gray-500 mt-1">PNG, JPG, JPEG up to 16MB</p>
+                            </div>
+                            <div id="uploadPreview" class="hidden mt-4">
+                                <img id="previewImage" class="max-w-32 max-h-32 mx-auto rounded-lg">
+                                <p id="uploadedFileName" class="text-sm text-gray-600 mt-2"></p>
+                                <button type="button" id="removeImage" class="text-red-500 text-sm mt-1 hover:underline">Remove</button>
+                            </div>
+                        </div>
+                        <p class="text-sm text-gray-500 mt-1">Upload your product image for better results, or we'll find one automatically</p>
+                    </div>
+
+                    <!-- Banner Configuration -->
+                    <div class="grid md:grid-cols-2 gap-6">
+                        
+                        <!-- Banner Size -->
+                        <div>
+                            <label for="bannerSize" class="block text-sm font-medium text-gray-700 mb-2">
+                                <i class="fas fa-expand-arrows-alt mr-2"></i>Banner Size
+                            </label>
+                            <select id="bannerSize" name="bannerSize" class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                                <option value="1024x1024">Square (1024×1024)</option>
+                                <option value="1536x1024">Landscape (1536×1024)</option>
+                                <option value="1024x1536">Portrait (1024×1536)</option>
+                            </select>
+                        </div>
+
+                        <!-- Copy Style -->
+                        <div>
+                            <label for="copyType" class="block text-sm font-medium text-gray-700 mb-2">
+                                <i class="fas fa-pen-fancy mr-2"></i>Copy Style
+                            </label>
+                            <select id="copyType" name="copyType" class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                                <option value="auto">Auto-Select Best</option>
+                                <option value="benefit">Benefit-Focused</option>
+                                <option value="urgency">Urgency-Driven</option>
+                                <option value="promo">Promotional</option>
+                                <option value="neutral">Professional</option>
+                                <option value="playful">Playful</option>
+                            </select>
+                        </div>
+                        
+                    </div>
+
+                    <!-- Generate Button -->
+                    <div class="text-center">
+                        <button type="submit" id="generateBtn" 
+                                class="bg-gradient-to-r from-blue-500 to-purple-600 text-white px-8 py-4 rounded-lg font-semibold text-lg shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-200">
+                            <i class="fas fa-magic mr-2"></i>
+                            Generate AI Banner
+                        </button>
+                    </div>
+                    
+                </form>
+            </div>
+
+            <!-- Progress Section -->
+            <div id="progressSection" class="hidden mt-8">
+                <div class="bg-white rounded-lg shadow-lg p-6">
+                    <h3 class="text-xl font-semibold text-gray-800 mb-4">Generating Your Banner</h3>
+                    
+                    <div class="mb-4">
+                        <div class="flex justify-between items-center mb-2">
+                            <span id="progressText" class="text-sm text-gray-600">Starting generation...</span>
+                            <span id="progressPercent" class="text-sm font-medium text-gray-800">0%</span>
+                        </div>
+                        <div class="w-full bg-gray-200 rounded-full h-3">
+                            <div id="progressBar" class="progress-bar bg-gradient-to-r from-blue-500 to-purple-600 h-3 rounded-full" style="width: 0%"></div>
+                        </div>
+                    </div>
+                    
+                    <div id="generationSteps" class="space-y-2 text-sm text-gray-600">
+                        <div class="flex items-center">
+                            <i class="fas fa-circle-notch fa-spin mr-2 text-blue-500"></i>
+                            <span>Preparing generation...</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Results Section -->
+            <div id="resultsSection" class="hidden mt-8">
+                <div class="bg-white rounded-lg shadow-lg p-6">
+                    <h3 class="text-xl font-semibold text-gray-800 mb-4">Your AI-Generated Banner</h3>
+                    
+                    <div class="grid md:grid-cols-2 gap-6">
+                        
+                        <!-- Banner Preview -->
+                        <div>
+                            <div class="border-2 border-gray-200 rounded-lg p-4 text-center">
+                                <img id="bannerPreview" class="max-w-full h-auto rounded-lg mx-auto" alt="Generated Banner">
+                            </div>
+                            
+                            <!-- Download Buttons -->
+                            <div class="mt-4 flex flex-wrap gap-2">
+                                <a id="downloadBanner" href="#" class="bg-blue-500 text-white px-4 py-2 rounded-lg text-sm hover:bg-blue-600 transition-colors">
+                                    <i class="fas fa-download mr-2"></i>Download PNG
+                                </a>
+                                <a id="downloadHTML" href="#" class="bg-green-500 text-white px-4 py-2 rounded-lg text-sm hover:bg-green-600 transition-colors">
+                                    <i class="fas fa-code mr-2"></i>Download HTML
+                                </a>
+                                <a id="downloadCSS" href="#" class="bg-purple-500 text-white px-4 py-2 rounded-lg text-sm hover:bg-purple-600 transition-colors">
+                                    <i class="fas fa-palette mr-2"></i>Download CSS
+                                </a>
+                            </div>
+                        </div>
+
+                        <!-- Generation Details -->
+                        <div>
+                            <h4 class="font-semibold text-gray-800 mb-3">Generation Details</h4>
+                            <div id="generationDetails" class="space-y-2 text-sm">
+                                <!-- Details will be populated by JavaScript -->
+                            </div>
+                            
+                            <!-- Actions -->
+                            <div class="mt-6 space-y-3">
+                                <button id="regenerateWithCopyBtn" class="bg-green-500 text-white px-4 py-2 rounded-lg text-sm hover:bg-green-600 transition-colors w-full">
+                                    <i class="fas fa-bolt mr-2"></i>Regenerate with Same Copy (Fastest)
+                                </button>
+                                <button id="regenerateBtn" class="bg-blue-500 text-white px-4 py-2 rounded-lg text-sm hover:bg-blue-600 transition-colors w-full">
+                                    <i class="fas fa-sync-alt mr-2"></i>Regenerate with Same URL
+                                </button>
+                                <button id="createAnotherBtn" class="bg-gray-500 text-white px-4 py-2 rounded-lg text-sm hover:bg-gray-600 transition-colors w-full">
+                                    <i class="fas fa-plus mr-2"></i>Create Another Banner
+                                </button>
+                            </div>
+                        </div>
+                        
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="bg-gray-800 text-white py-8 mt-16">
+        <div class="container mx-auto px-4 text-center">
+            <p>&copy; 2025 AI Banner Maker. Powered by GPT Image 1, Google Vision, and GPT-4.1 mini.</p>
+        </div>
+    </footer>
+
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>
