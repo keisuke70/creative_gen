@@ -13,7 +13,7 @@ Input: Landing page URL → Output: Professional marketing banner with optimized
 - **Unified AI Generation**: Single AI call creates complete banners with text, layout, and styling
 - **Smart Web Scraping**: Extracts content and context from any landing page
 - **Intelligent Text Positioning**: Dimension-aware prompts prevent text overflow on all banner sizes
-- **Smart Copy Generation**: GPT-4.1 creates 5 copy variants optimized for different marketing goals
+- **Smart Copy Generation**: GPT-4.1 creates 3 copy variants with auto-selection or manual choice for optimal marketing impact
 - **Multiple Banner Sizes**: Square (1024×1024), Landscape (1536×1024), Portrait (1024×1536)
 - **Product Image Support**: Upload your own product images for enhanced results
 - **Web App Interface**: Easy-to-use browser interface with real-time progress
@@ -120,14 +120,14 @@ python3 -m src.main https://example.com/lp \
 
 **Streamlined AI-First Pipeline**:
 1. **Web Scraping** → Playwright extracts content and context from landing page
-2. **Copy Generation** → GPT-4.1 creates marketing copy variants optimized for banners
+2. **Copy Generation** → GPT-4.1 creates 3 marketing copy variants with auto-selection or manual choice
 3. **Unified AI Generation** → GPT Image 1 creates complete banner with text, layout, and styling in one call
 4. **Dimension Optimization** → Smart prompts ensure perfect text positioning for each banner size
 5. **Export** → Generates PNG + responsive HTML/CSS
 
 ### Technology Stack
 - **Playwright**: Headless browser for web scraping
-- **OpenAI GPT-4.1**: Marketing copy generation and optimization
+- **OpenAI GPT-4.1**: Marketing copy generation with intelligent variant selection
 - **OpenAI GPT Image 1**: Advanced image generation with text integration
 - **Flask**: Web application framework
 - **PIL/Pillow**: Image processing and optimization
@@ -215,12 +215,14 @@ Each banner generation creates:
 
 ## 🎨 Copy Types & Visual Styles
 
-The system generates 5 copy variants:
-- **Benefit**: Trust-focused, professional styling
-- **Urgency**: Action-driven, bold colors
-- **Promo**: Sale-focused, celebratory effects
-- **Neutral**: Clean, minimalist approach
-- **Playful**: Fun, colorful, engaging
+The system generates 3 copy variants with flexible selection options:
+- **Benefit**: Trust-focused, professional styling (prioritized for auto-selection)
+- **Urgency**: Action-driven, bold colors (prioritized for auto-selection)  
+- **Promo**: Sale-focused, celebratory effects (prioritized for auto-selection)
+
+**Selection Modes**:
+- **Auto-Selection**: System automatically chooses the best variant based on length and impact
+- **Manual Selection**: User reviews all 3 variants and chooses their preferred copy
 
 ## 🚨 Important Notes
 

@@ -12,7 +12,7 @@ Professional web application for creating AI-powered marketing banners with stre
 - **Smart Landing Page Analysis** - Extracts content and context automatically
 - **Optional Product Upload** - Manual image upload for enhanced results
 - **Multiple Banner Sizes** - Square (1024×1024), Landscape (1536×1024), Portrait (1024×1536)
-- **5 Copy Styles** - Benefit, urgency, promotional, neutral, and playful
+- **Smart Copy Selection** - Generates 3 copy styles (benefit, urgency, promotional) with auto-selection or manual choice
 - **Real-time Progress** - Live generation status with detailed progress tracking
 - **Instant Downloads** - PNG, HTML, and CSS files ready for use
 
@@ -20,8 +20,8 @@ Professional web application for creating AI-powered marketing banners with stre
 
 ### **Simplified AI-First Flow**
 ```
-LP URL → Extract Content & Context → Generate Copy + Visual Prompts → 
-Single AI Generation (Complete Creative with Perfect Text) → Output
+LP URL → Extract Content & Context → Generate 3 Copy Variants → 
+Auto-Select or Manual Choice → Single AI Generation (Complete Creative) → Output
 ```
 
 ## 📦 Installation
@@ -85,7 +85,8 @@ Start banner generation
 {
   "url": "https://example.com/landing-page",
   "banner_size": "1024x1024|1536x1024|1024x1536",
-  "copy_type": "auto|benefit|urgency|promo|neutral|playful",
+  "copy_selection_mode": "auto|manual",
+  "selected_copy_index": 0,
   "product_image_path": "/path/to/uploaded/image.jpg"
 }
 ```

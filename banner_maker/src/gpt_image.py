@@ -138,14 +138,23 @@ TEXT INTEGRATION WITH PRODUCT IMAGE:
 - Text should complement the product, not compete with it
 - Use the background space effectively for text placement"""
         else:
-            product_instruction = f"Create or incorporate visual elements representing: {product_context[:200] if product_context else 'the business/service described'}"
+            product_instruction = f"""Create visual elements representing: {product_context[:200] if product_context else 'the business/service described'}
+
+CRITICAL: Product/visual elements must be COMPLETELY TEXT-FREE:
+- NO text, words, letters, or typography in the product/visual imagery
+- NO logos, brand names, labels, or written content
+- NO signs, banners, or text overlays in the visual elements
+- Product imagery should be clean, minimal, and purely visual
+- Focus on shapes, objects, colors, and visual concepts only
+- Text will be added separately as an overlay"""
             text_instruction = f"""
-TEXT AS MAIN ELEMENT:
-- The marketing text "{copy_text}" should be prominently featured
+TEXT AS OVERLAY ELEMENT:
+- The marketing text "{copy_text}" will be overlaid on the background
 - Text must stay within {int(width * 0.55)}px width and {int(height * 0.20)}px height limits  
 - Leave minimum {max(60, width//20)}px margins from all canvas edges
-- Integrate text naturally with the visual design
-- Text can be more prominent since there's no product image to compete with"""
+- Text should be positioned in an area with good contrast
+- Reserve space for text overlay in the composition
+- Ensure the visual design supports text readability"""
         
         # Build unified prompt
         unified_prompt = f"""Create a complete marketing banner creative with the following specifications:
@@ -165,8 +174,10 @@ VISUAL STYLE:
 - Background: {background_prompt or 'complementary professional background'}
 - Brand context: {brand_context or 'modern business'}
 
-CRITICAL PRODUCT IMAGE REQUIREMENTS:
+CRITICAL VISUAL/PRODUCT REQUIREMENTS:
 {product_instruction}
+
+ESSENTIAL: All visual elements (products, objects, backgrounds) must be COMPLETELY FREE of any text, typography, or written content. Any text will be added as a separate overlay layer.
 
 TECHNICAL REQUIREMENTS:
 - High resolution, print-ready quality
@@ -190,7 +201,12 @@ TEXT REQUIREMENTS FOR {width}x{height} CANVAS:
 - Split long text across 2-3 lines, reduce font if needed
 - NEVER extend beyond canvas boundaries
 
-FINAL REMINDER: If a product image was provided, use it EXACTLY as uploaded without any modifications whatsoever. The product image must remain in its original, unaltered state.
+FINAL CRITICAL REQUIREMENTS:
+- If a product image was provided, use it EXACTLY as uploaded without any modifications whatsoever
+- If generating visual elements from scratch, ensure they contain ZERO text, words, or typography
+- All visual elements must be completely text-free - text will be handled as a separate overlay
+- Focus purely on visual imagery, shapes, colors, and objects without any written content
+- Reserve appropriate space for the text overlay to be added later
 
 Create a complete, ready-to-use marketing banner that combines all these elements seamlessly with the text clearly visible and properly contained within the specified dimensions."""
         

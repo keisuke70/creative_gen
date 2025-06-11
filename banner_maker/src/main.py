@@ -29,8 +29,9 @@ from .export_html import generate_banner_html_css
 @click.option('--font-size', default=48, help='Font size for banner text (default: 48)')
 @click.option('--skip-html', is_flag=True, help='Skip HTML/CSS generation')
 @click.option('--disable-effects', is_flag=True, help='Disable visual effects and enhancements')
+@click.option('--copy-selection', type=click.Choice(['auto', 'manual']), default='auto', help='Copy selection mode: auto or manual (default: auto)')
 @click.option('--verbose', '-v', is_flag=True, help='Verbose output')
-def main(url: str, fallback: str, enhance_bg: bool, output_dir: str, banner_size: str, font_size: int, skip_html: bool, disable_effects: bool, verbose: bool):
+def main(url: str, fallback: str, enhance_bg: bool, output_dir: str, banner_size: str, font_size: int, skip_html: bool, disable_effects: bool, copy_selection: str, verbose: bool):
     """
     Generate marketing banner from landing page URL
     
@@ -46,6 +47,7 @@ def main(url: str, fallback: str, enhance_bg: bool, output_dir: str, banner_size
         font_size=font_size,
         skip_html=skip_html,
         disable_effects=disable_effects,
+        copy_selection=copy_selection,
         verbose=verbose
     ))
 
@@ -59,6 +61,7 @@ async def process_landing_page(
     font_size: int = 48,
     skip_html: bool = False,
     disable_effects: bool = False,
+    copy_selection: str = 'auto',
     verbose: bool = False
 ) -> Dict:
     """
@@ -163,8 +166,33 @@ async def process_landing_page(
             description=page_meta['description']
         )
         
-        # Select best copy for banner
-        best_copy = select_best_copy_for_banner(copy_variants, max_chars=60)
+        # Select copy for banner
+        copy_selection_result = select_best_copy_for_banner(
+            copy_variants, 
+            max_chars=60, 
+            manual_selection=(copy_selection == 'manual')
+        )
+        
+        # Handle manual selection mode
+        if copy_selection == 'manual' and copy_selection_result.get('mode') == 'manual':
+            if verbose:
+                click.echo("📝 Available copy variants:")
+                for i, variant in enumerate(copy_selection_result['variants'], 1):
+                    click.echo(f"   {i}. {variant['type'].upper()}: {variant['text']}")
+            
+            # Prompt user to select
+            while True:
+                try:
+                    choice = click.prompt('Select copy variant (1-3)', type=int)
+                    if 1 <= choice <= len(copy_selection_result['variants']):
+                        best_copy = copy_selection_result['variants'][choice - 1]
+                        break
+                    else:
+                        click.echo("Invalid choice. Please select 1-3.")
+                except (ValueError, click.Abort):
+                    click.echo("Invalid input. Please enter a number 1-3.")
+        else:
+            best_copy = copy_selection_result
         
         if verbose:
             click.echo(f"📝 Selected copy ({best_copy['type']}): {best_copy['text']}")

@@ -43,6 +43,19 @@ class BannerMaker {
                 this.checkUrlCacheStatus(e.target.value.trim());
             }, 1000); // Check after 1 second of no typing
         });
+
+        // Copy selection mode change
+        document.getElementById('copySelectionMode').addEventListener('change', (e) => {
+            const isManual = e.target.value === 'manual';
+            this.toggleCopyVariantsSection(isManual);
+            
+            // Reset copy variants display and button when switching modes
+            if (isManual) {
+                this.showCopyVariantsPlaceholder();
+            } else {
+                this.resetGenerateButton();
+            }
+        });
     }
 
 
@@ -164,6 +177,21 @@ class BannerMaker {
         // Store current URL for regeneration
         this.currentUrl = url;
 
+        const copySelectionMode = document.getElementById('copySelectionMode').value;
+
+        // Handle manual copy selection mode
+        if (copySelectionMode === 'manual' && !this.hasCopyVariantsLoaded()) {
+            // First stage: Load copy variants and wait for selection
+            await this.loadCopyVariantsForSelection(url);
+            return; // Stop here, wait for user selection
+        }
+
+        // Validate copy selection in manual mode
+        if (copySelectionMode === 'manual' && !this.hasValidCopySelection()) {
+            this.showError('Please select a copy variant before generating');
+            return;
+        }
+
         // Check cache status (unless skip_copy is true)
         if (!options.skip_copy) {
             await this.checkCacheStatus(url);
@@ -172,10 +200,19 @@ class BannerMaker {
         const formData = {
             url: url,
             banner_size: document.getElementById('bannerSize').value,
-            copy_type: document.getElementById('copyType').value,
+            copy_selection_mode: copySelectionMode,
             product_image_path: this.uploadedImagePath,
             ...options
         };
+
+        // Add copy selection data if in manual mode
+        if (copySelectionMode === 'manual') {
+            formData.selected_copy_index = this.getSelectedCopyIndex();
+            // If copy variants are loaded, skip regenerating copy
+            if (this.hasCopyVariantsLoaded()) {
+                formData.skip_copy = true;
+            }
+        }
 
         try {
             // Show progress section
@@ -237,6 +274,9 @@ class BannerMaker {
                 if (result.status === 'completed') {
                     this.stopPolling();
                     this.showResults(result);
+                } else if (result.status === 'copy_selection_required') {
+                    this.stopPolling();
+                    this.handleCopySelectionRequired(result);
                 } else if (result.status === 'error') {
                     this.stopPolling();
                     this.showError('Generation failed: ' + result.error);
@@ -484,6 +524,181 @@ class BannerMaker {
         setTimeout(() => {
             if (errorDiv.parentElement) {
                 errorDiv.remove();
+            }
+        }, 5000);
+    }
+
+    toggleCopyVariantsSection(show) {
+        const section = document.getElementById('copyVariantsSection');
+        if (show) {
+            section.classList.remove('hidden');
+        } else {
+            section.classList.add('hidden');
+        }
+    }
+
+    async loadCopyVariantsForSelection(url) {
+        // Show loading state
+        this.showCopyVariantsLoading();
+
+        try {
+            const response = await fetch('/api/copy-variants', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ url: url })
+            });
+
+            const result = await response.json();
+
+            if (result.variants) {
+                this.displayCopyVariants(result.variants);
+                this.updateGenerateButtonForCopySelection();
+            } else {
+                throw new Error(result.error || 'Failed to load copy variants');
+            }
+
+        } catch (error) {
+            console.error('Error loading copy variants:', error);
+            this.showCopyVariantsError(error.message);
+        }
+    }
+
+    // Legacy method for compatibility
+    async loadCopyVariants() {
+        const url = document.getElementById('url').value.trim();
+        if (!url) {
+            this.showCopyVariantsPlaceholder();
+            return;
+        }
+        await this.loadCopyVariantsForSelection(url);
+    }
+
+    displayCopyVariants(variants) {
+        const container = document.getElementById('copyVariantsList');
+        container.innerHTML = '';
+
+        variants.forEach((variant, index) => {
+            const variantDiv = document.createElement('div');
+            variantDiv.className = 'border border-gray-200 rounded-lg p-4 hover:border-blue-300 transition-colors';
+            
+            variantDiv.innerHTML = `
+                <label class="flex items-start space-x-3 cursor-pointer">
+                    <input type="radio" name="copyVariant" value="${index}" class="mt-1" ${index === 0 ? 'checked' : ''}>
+                    <div class="flex-1">
+                        <div class="flex items-center justify-between mb-2">
+                            <span class="font-semibold text-gray-800 capitalize">${variant.type}</span>
+                            <span class="text-xs text-gray-500">${variant.char_count} chars</span>
+                        </div>
+                        <p class="text-gray-700">${variant.text}</p>
+                        <p class="text-xs text-gray-500 mt-1">${variant.tone}</p>
+                    </div>
+                </label>
+            `;
+            
+            container.appendChild(variantDiv);
+        });
+    }
+
+    getSelectedCopyIndex() {
+        const selectedRadio = document.querySelector('input[name="copyVariant"]:checked');
+        return selectedRadio ? parseInt(selectedRadio.value) : 0;
+    }
+
+    showCopyVariantsPlaceholder() {
+        const container = document.getElementById('copyVariantsList');
+        container.innerHTML = `
+            <div class="text-center text-gray-500 py-8">
+                <i class="fas fa-pen-fancy text-3xl mb-3"></i>
+                <p>Click "Generate AI Banner" to load copy options</p>
+            </div>
+        `;
+    }
+
+    showCopyVariantsLoading() {
+        const container = document.getElementById('copyVariantsList');
+        container.innerHTML = `
+            <div class="text-center text-gray-500 py-8">
+                <i class="fas fa-spinner fa-spin text-3xl mb-3"></i>
+                <p>Analyzing landing page and generating copy variants...</p>
+                <p class="text-sm text-gray-400 mt-1">This may take a few seconds</p>
+            </div>
+        `;
+    }
+
+    showCopyVariantsError(message) {
+        const container = document.getElementById('copyVariantsList');
+        container.innerHTML = `
+            <div class="text-center text-red-500 py-8">
+                <i class="fas fa-exclamation-triangle text-3xl mb-3"></i>
+                <p>Failed to load copy variants</p>
+                <p class="text-sm text-gray-500 mt-1">${message}</p>
+            </div>
+        `;
+    }
+
+    hasCopyVariantsLoaded() {
+        const container = document.getElementById('copyVariantsList');
+        return container.querySelector('input[name="copyVariant"]') !== null;
+    }
+
+    hasValidCopySelection() {
+        const selectedRadio = document.querySelector('input[name="copyVariant"]:checked');
+        return selectedRadio !== null;
+    }
+
+    updateGenerateButtonForCopySelection() {
+        const generateBtn = document.getElementById('generateBtn');
+        generateBtn.innerHTML = '<i class="fas fa-magic mr-2"></i>Generate Banner with Selected Copy';
+        
+        // Add event listener to radio buttons to update button text
+        const radioButtons = document.querySelectorAll('input[name="copyVariant"]');
+        radioButtons.forEach(radio => {
+            radio.addEventListener('change', () => {
+                generateBtn.innerHTML = '<i class="fas fa-magic mr-2"></i>Generate Banner with Selected Copy';
+            });
+        });
+    }
+
+    resetGenerateButton() {
+        const generateBtn = document.getElementById('generateBtn');
+        generateBtn.innerHTML = '<i class="fas fa-magic mr-2"></i>Generate AI Banner';
+    }
+
+    handleCopySelectionRequired(result) {
+        // Hide progress section
+        this.hideProgressSection();
+        
+        // Display copy variants
+        if (result.copy_variants) {
+            this.displayCopyVariants(result.copy_variants);
+            this.updateGenerateButtonForCopySelection();
+        }
+        
+        // Show success message
+        this.showInfo('Copy variants generated! Please select your preferred copy and click the generate button again.');
+    }
+
+    showInfo(message) {
+        const infoDiv = document.createElement('div');
+        infoDiv.className = 'fixed top-4 right-4 bg-blue-500 text-white px-6 py-3 rounded-lg shadow-lg z-50';
+        infoDiv.innerHTML = `
+            <div class="flex items-center">
+                <i class="fas fa-info-circle mr-2"></i>
+                <span>${message}</span>
+                <button class="ml-4 text-white hover:text-gray-200" onclick="this.parentElement.parentElement.remove()">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+        `;
+        
+        document.body.appendChild(infoDiv);
+        
+        // Auto-remove after 5 seconds
+        setTimeout(() => {
+            if (infoDiv.parentElement) {
+                infoDiv.remove();
             }
         }, 5000);
     }

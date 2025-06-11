@@ -53,18 +53,6 @@ def generate_copy_and_visual_prompts(
                 "instruction": "Highlight deals, offers, or promotional aspects. Make it sales-focused.",
                 "tone": "promotional and enticing",
                 "visual_theme": "celebratory, eye-catching background with warm lighting and promotional feel"
-            },
-            {
-                "type": "neutral",
-                "instruction": "Professional, straightforward messaging. Factual and trustworthy.",
-                "tone": "professional and informative",
-                "visual_theme": "minimalist, sophisticated background with soft lighting and neutral tones"
-            },
-            {
-                "type": "playful",
-                "instruction": "Fun, engaging, personality-driven copy. Make it memorable.",
-                "tone": "playful and engaging",
-                "visual_theme": "fun, colorful, lifestyle-oriented background with natural elements"
             }
         ]
         
@@ -173,22 +161,6 @@ def generate_fallback_copy_with_prompts(text_content: str, title: str = "") -> L
             "char_count": 0,
             "background_prompt": "celebratory, eye-catching background with warm lighting and promotional feel",
             "visual_theme": "celebratory"
-        },
-        {
-            "type": "neutral",
-            "text": f"Professional {base_title.lower()} solutions. Learn more.",
-            "tone": "professional",
-            "char_count": 0,
-            "background_prompt": "minimalist, sophisticated background with soft lighting and neutral tones",
-            "visual_theme": "minimalist"
-        },
-        {
-            "type": "playful",
-            "text": "Ready to level up? Let's make it happen!",
-            "tone": "playful",
-            "char_count": 0,
-            "background_prompt": "fun, colorful, lifestyle-oriented background with natural elements",
-            "visual_theme": "lifestyle"
         }
     ]
     
@@ -240,20 +212,26 @@ async def generate_copy_async(
     )
 
 
-def select_best_copy_for_banner(variants: List[Dict], max_chars: int = 50) -> Dict:
+def select_best_copy_for_banner(variants: List[Dict], max_chars: int = 50, manual_selection: bool = False) -> Dict:
     """
     Select the best copy variant for banner use based on length and impact
+    If manual_selection is True, returns all variants for user selection
     """
     # Filter by character limit
     suitable_variants = [v for v in variants if v['char_count'] <= max_chars]
     
     if not suitable_variants:
         # Use shortest variant and truncate
-        shortest = min(variants, key=lambda x: x['char_count'])
-        shortest['text'] = optimize_copy_for_banner(shortest['text'], max_chars)
-        return shortest
+        for variant in variants:
+            variant['text'] = optimize_copy_for_banner(variant['text'], max_chars)
+            variant['char_count'] = len(variant['text'])
+        suitable_variants = variants
     
-    # Prefer benefit or urgency variants for banners
+    # If manual selection is requested, return all suitable variants
+    if manual_selection:
+        return {"mode": "manual", "variants": suitable_variants}
+    
+    # Auto-select: Prefer benefit, urgency, promo in that order
     priority_types = ['benefit', 'urgency', 'promo']
     
     for ptype in priority_types:
