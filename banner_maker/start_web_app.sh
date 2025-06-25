@@ -8,8 +8,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
 # Load environment variables from .env file
-if [ -f "../.env" ]; then
+if [ -f ".env" ]; then
     echo "📄 Loading environment variables from .env file..."
+    export $(cat .env | grep -v '^#' | xargs)
+elif [ -f "../.env" ]; then
+    echo "📄 Loading environment variables from parent .env file..."
     export $(cat ../.env | grep -v '^#' | xargs)
 fi
 
@@ -23,12 +26,6 @@ fi
 if [ -z "$OPENAI_API_KEY" ]; then
     echo "❌ OPENAI_API_KEY environment variable not set"
     echo "Please set it with: export OPENAI_API_KEY='your-api-key'"
-    exit 1
-fi
-
-if [ -z "$GOOGLE_APPLICATION_CREDENTIALS" ]; then
-    echo "❌ GOOGLE_APPLICATION_CREDENTIALS environment variable not set"
-    echo "Please set it with: export GOOGLE_APPLICATION_CREDENTIALS='/path/to/credentials.json'"
     exit 1
 fi
 

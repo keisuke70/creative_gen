@@ -10,7 +10,7 @@ from app import app
 
 if __name__ == '__main__':
     # Check environment variables
-    required_env_vars = ['OPENAI_API_KEY', 'GOOGLE_APPLICATION_CREDENTIALS']
+    required_env_vars = ['OPENAI_API_KEY']
     missing_vars = [var for var in required_env_vars if not os.getenv(var)]
     
     if missing_vars:
