@@ -56,6 +56,16 @@ class BannerMaker {
                 this.resetGenerateButton();
             }
         });
+
+        // Cleanup on page unload
+        window.addEventListener('beforeunload', () => {
+            if (this.uploadedImagePath) {
+                // Use sendBeacon for cleanup on page unload (more reliable than fetch)
+                navigator.sendBeacon('/api/cleanup-image', JSON.stringify({
+                    image_path: this.uploadedImagePath
+                }));
+            }
+        });
     }
 
 
@@ -115,6 +125,11 @@ class BannerMaker {
         }
 
         try {
+            // Clean up previous upload if exists
+            if (this.uploadedImagePath) {
+                await this.cleanupUploadedImage(this.uploadedImagePath);
+            }
+
             // Show preview immediately
             const reader = new FileReader();
             reader.onload = (e) => {
@@ -151,11 +166,37 @@ class BannerMaker {
         }
     }
 
-    removeUploadedImage() {
+    async removeUploadedImage() {
+        // Clean up file from server if exists
+        if (this.uploadedImagePath) {
+            await this.cleanupUploadedImage(this.uploadedImagePath);
+        }
+
         this.uploadedImagePath = null;
         document.getElementById('uploadArea').classList.remove('hidden');
         document.getElementById('uploadPreview').classList.add('hidden');
         document.getElementById('productImage').value = '';
+    }
+
+    async cleanupUploadedImage(imagePath) {
+        try {
+            const response = await fetch('/api/cleanup-image', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    image_path: imagePath
+                })
+            });
+
+            const result = await response.json();
+            if (!result.success && result.error) {
+                console.warn('Failed to cleanup image:', result.error);
+            }
+        } catch (error) {
+            console.warn('Error cleaning up image:', error);
+        }
     }
 
     isValidImageFile(file) {

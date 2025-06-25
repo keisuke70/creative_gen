@@ -287,17 +287,17 @@ def run_generation_async(session_id: str, url: str, mode: str, banner_size: str,
             'message': 'Starting generation...'
         }
         
-        # Run the async generation
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        
-        result = loop.run_until_complete(
+        # Run the actual generation
+        asyncio.set_event_loop(asyncio.new_event_loop())
+        result = asyncio.run(
             generate_banner_async(session_id, url, mode, banner_size, copy_type, product_image_path, skip_copy, copy_selection_mode, selected_copy_index)
         )
         
+        # Store final result
         generation_results[session_id] = result
         
     except Exception as e:
+        logger.error(f"Generation failed: {e}", exc_info=True)
         generation_results[session_id] = {
             'status': 'error',
             'error': str(e),
@@ -308,183 +308,133 @@ def run_generation_async(session_id: str, url: str, mode: str, banner_size: str,
 async def generate_banner_async(session_id: str, url: str, mode: str, banner_size: str, copy_type: str, product_image_path: Optional[str] = None, skip_copy: bool = False, copy_selection_mode: str = 'auto', selected_copy_index: Optional[int] = None) -> Dict:
     """Async banner generation with progress updates"""
     try:
-        logger.info(f"Starting banner generation for session {session_id}")
-        logger.info(f"URL: {url}, Mode: {mode}, Size: {banner_size}, Copy type: {copy_type}")
-        
         # Parse dimensions
-        width, height = map(int, banner_size.split('x'))
-        output_dir = os.path.join(app.config['UPLOAD_FOLDER'], session_id)
-        os.makedirs(output_dir, exist_ok=True)
-        logger.info(f"Output directory: {output_dir}")
-        
-        # Step 1: Check cache or scrape landing page
-        cached_data = get_cached_scraping_data(url)
-        if cached_data:
-            generation_results[session_id]['progress'] = 10
-            generation_results[session_id]['message'] = 'Using cached page data...'
-            logger.info(f"Using cached scraping data for URL: {url}")
-            
-            lp_data = cached_data['lp_data']
-            page_meta = cached_data['page_meta']
+        if 'x' in banner_size:
+            width, height = map(int, banner_size.split('x'))
         else:
-            generation_results[session_id]['progress'] = 10
-            generation_results[session_id]['message'] = 'Scraping landing page...'
-            logger.info(f"Scraping fresh data for URL: {url}")
-            
+            width = height = 1024
+        
+        # Update progress: Starting
+        generation_results[session_id].update({
+            'progress': 5,
+            'message': 'Analyzing landing page...'
+        })
+        
+        # Check cache first for scraping data
+        cached_scraping_data = get_cached_scraping_data(url)
+        
+        if cached_scraping_data:
+            lp_data = cached_scraping_data['lp_data']
+            page_meta = cached_scraping_data['page_meta']
+            logger.info(f"Using cached scraping data for {url}")
+        else:
+            # Scrape landing page
+            logger.info(f"Scraping landing page: {url}")
             lp_data = await scrape_landing_page(url)
             page_meta = await get_page_title_and_description(url)
             
-            # Cache the results
+            # Cache the scraping results
             cache_scraping_data(url, lp_data, page_meta)
-            logger.info(f"Cached scraping data for URL: {url}")
+            logger.info(f"Cached scraping data for {url}")
         
-        # Step 2: Check cache or generate copy and visual prompts
-        cached_copy_data = get_cached_copy_data(url)
-        if cached_copy_data and cached_copy_data['copy_variants']:
-            generation_results[session_id]['progress'] = 20
-            generation_results[session_id]['message'] = 'Using cached copy data...'
-            logger.info(f"Using cached copy data for URL: {url}")
-            
-            copy_variants = cached_copy_data['copy_variants']
-            
-            # Handle copy selection from cached data
-            if copy_selection_mode == 'manual':
-                if selected_copy_index is not None:
-                    # Use manually selected copy from cached variants
-                    if 0 <= selected_copy_index < len(copy_variants):
-                        best_copy = copy_variants[selected_copy_index]
-                        logger.info(f"Using manually selected copy (index {selected_copy_index}): {best_copy['text']}")
-                        # Update cache with selected copy
-                        cache_copy_data(url, copy_variants, best_copy)
-                    else:
-                        best_copy = copy_variants[0]  # Fallback to first variant
-                        logger.warning(f"Invalid copy index {selected_copy_index}, using first variant")
-                        # Update cache with fallback copy
-                        cache_copy_data(url, copy_variants, best_copy)
-                else:
-                    # Manual mode but no selection made - return variants for selection
-                    logger.info("Manual mode with cached data: stopping generation to wait for copy selection")
-                    generation_results[session_id]['progress'] = 30
-                    generation_results[session_id]['message'] = 'Copy variants available. Please select your preferred copy.'
-                    
-                    return {
-                        'status': 'copy_selection_required',
-                        'copy_variants': copy_variants,
-                        'session_id': session_id,
-                        'message': 'Please select a copy variant to continue generation'
-                    }
+        # Update progress: Page scraped
+        generation_results[session_id].update({
+            'progress': 15,
+            'message': 'Generating marketing copy...'
+        })
+        
+        # Handle copy generation/selection
+        if copy_selection_mode == 'manual' and selected_copy_index is not None:
+            # Use manually selected copy
+            cached_copy_data = get_cached_copy_data(url)
+            if cached_copy_data and selected_copy_index < len(cached_copy_data['copy_variants']):
+                copy_variants = cached_copy_data['copy_variants']
+                best_copy = copy_variants[selected_copy_index]
+                logger.info(f"Using manually selected copy variant: {selected_copy_index}")
             else:
-                # Auto mode - use cached best_copy or select automatically
-                if cached_copy_data['best_copy']:
-                    best_copy = cached_copy_data['best_copy']
-                else:
-                    best_copy = select_best_copy_for_banner(copy_variants, max_chars=60)
+                raise Exception("Selected copy variant not available")
         else:
-            generation_results[session_id]['progress'] = 20
-            generation_results[session_id]['message'] = 'Generating marketing copy...'
-            
-            copy_variants = generate_copy_and_visual_prompts(
-                text_content=lp_data['text_content'],
-                title=page_meta['title'],
-                description=page_meta['description']
-            )
-            
-            # Handle manual copy selection mode - stop here if no selection made
-            if copy_selection_mode == 'manual':
-                if selected_copy_index is None:
-                    # First generation in manual mode - return copy variants for selection
-                    logger.info("Manual mode: stopping generation to wait for copy selection")
-                    generation_results[session_id]['progress'] = 30
-                    generation_results[session_id]['message'] = 'Copy variants generated. Please select your preferred copy.'
-                    
-                    # Cache the copy results without best_copy selection
-                    cache_copy_data(url, copy_variants, None)
-                    
-                    return {
-                        'status': 'copy_selection_required',
-                        'copy_variants': copy_variants,
-                        'session_id': session_id,
-                        'message': 'Please select a copy variant to continue generation'
-                    }
+            # Auto copy selection
+            if skip_copy:
+                # Use cached copy
+                cached_copy_data = get_cached_copy_data(url)
+                if cached_copy_data:
+                    copy_variants = cached_copy_data['copy_variants']
+                    best_copy = cached_copy_data['best_copy']
+                    logger.info("Using cached copy data")
                 else:
-                    # Use manually selected copy
-                    if 0 <= selected_copy_index < len(copy_variants):
-                        best_copy = copy_variants[selected_copy_index]
-                    else:
-                        best_copy = copy_variants[0]  # Fallback to first variant
-            elif copy_type != 'auto':
-                # Filter for specific copy type
-                selected_variants = [v for v in copy_variants if v['type'] == copy_type]
-                if selected_variants:
-                    best_copy = selected_variants[0]
-                else:
-                    best_copy = copy_variants[0]
+                    raise Exception("No cached copy data available for skip_copy mode")
             else:
+                # Generate new copy
+                copy_variants = generate_copy_and_visual_prompts(
+                    text_content=lp_data['text_content'],
+                    title=page_meta['title'],
+                    description=page_meta['description']
+                )
+                
+                # Select best copy for banner
                 best_copy = select_best_copy_for_banner(copy_variants, max_chars=60)
-            
-            # Cache the copy results
-            cache_copy_data(url, copy_variants, best_copy)
-            logger.info(f"Cached copy data for URL: {url}")
+                
+                # Cache the copy results
+                cache_copy_data(url, copy_variants, best_copy)
+                logger.info("Generated and cached new copy variants")
         
-        banner_path = os.path.join(output_dir, 'banner.png')
+        # Update progress: Copy generated
+        generation_results[session_id].update({
+            'progress': 35,
+            'message': 'Creating banner design...'
+        })
         
-        # Step 3: Unified AI generation with comprehensive prompt
-        logger.info("Using unified AI generation mode")
-        generation_results[session_id]['progress'] = 40
-        generation_results[session_id]['message'] = 'Generating complete creative with AI...'
+        # Generate banner path
+        session_folder = os.path.join(app.config['UPLOAD_FOLDER'], session_id)
+        os.makedirs(session_folder, exist_ok=True)
+        banner_path = os.path.join(session_folder, 'banner.png')
         
-        logger.info(f"Unified generation params: copy='{best_copy['text']}', type='{best_copy['type']}'")
-        unified_result = await generate_unified_creative(
+        # Update progress: Starting banner generation
+        generation_results[session_id].update({
+            'progress': 50,
+            'message': 'Generating banner with AI...'
+        })
+        
+        # Generate banner
+        banner_result = await generate_unified_creative(
             copy_text=best_copy['text'],
             copy_type=best_copy['type'],
-            background_prompt=best_copy.get('background_prompt', ''),
-            brand_context=page_meta['title'],
-            product_context=lp_data['text_content'][:500],
+            background_prompt=lp_data.get('visual_elements', ''),
+            brand_context=f"{page_meta['title']} - {page_meta['description']}",
+            product_context=lp_data.get('text_content', '')[:500],
             dimensions=(width, height),
             output_path=banner_path,
             product_image_path=product_image_path
         )
         
-        logger.info(f"Unified generation result: {unified_result}")
-        if not unified_result['success']:
-            error_msg = f"Unified generation failed: {unified_result['error']}"
-            logger.error(error_msg)
-            raise Exception(error_msg)
+        if not banner_result.get('success'):
+            raise Exception(f"Banner generation failed: {banner_result.get('error', 'Unknown error')}")
         
-        image_source = "GPT_UNIFIED"
-        logger.info(f"Unified creative saved to: {banner_path}")
+        # Update progress: Banner generated
+        generation_results[session_id].update({
+            'progress': 85,
+            'message': 'Finalizing banner...'
+        })
         
-        # Step 6: Generate HTML/CSS
-        generation_results[session_id]['progress'] = 90
-        generation_results[session_id]['message'] = 'Generating web assets...'
+        # Determine image source
+        image_source = "Product image + AI background" if product_image_path else "AI generated"
         
-        try:
-            logger.info("Starting HTML/CSS generation...")
-            from src.export_html import generate_banner_html_css
-            html_result = generate_banner_html_css(
-                banner_image_path=banner_path,
-                copy_text=best_copy['text'],
-                banner_size=(width, height),
-                output_dir=output_dir
-            )
-            logger.info(f"HTML/CSS generation result: {html_result}")
-        except Exception as e:
-            logger.error(f"HTML/CSS generation failed: {e}", exc_info=True)
-            html_result = {'success': False, 'error': str(e)}
+        # Update progress: Completed
+        generation_results[session_id].update({
+            'progress': 100,
+            'message': 'Banner completed!'
+        })
         
-        # Complete
-        logger.info("Finalizing banner generation...")
-        generation_results[session_id]['progress'] = 100
-        generation_results[session_id]['message'] = 'Banner generated successfully!'
-        
+        # Prepare final result
         try:
             result = {
                 'status': 'completed',
                 'progress': 100,
                 'message': 'Banner generated successfully!',
                 'banner_path': banner_path,
-                'html_path': html_result.get('html_path') if html_result.get('success') else None,
-                'css_path': html_result.get('css_path') if html_result.get('success') else None,
+                'html_path': None,  # HTML generation not implemented in unified mode
+                'css_path': None,   # CSS generation not implemented in unified mode
                 'image_source': image_source,
                 'copy_used': best_copy,
                 'banner_url': f'/api/download/{session_id}/banner',  # Direct URL instead of url_for
@@ -492,13 +442,10 @@ async def generate_banner_async(session_id: str, url: str, mode: str, banner_siz
                 'dimensions': f"{width}x{height}"
             }
             
-            # Clean up uploaded product image after successful generation
+            # Keep uploaded product image for potential reuse
+            # Note: Image will be cleaned up when user uploads a new one or session ends
             if product_image_path and os.path.exists(product_image_path):
-                try:
-                    os.remove(product_image_path)
-                    logger.info(f"Cleaned up uploaded product image: {product_image_path}")
-                except Exception as cleanup_error:
-                    logger.warning(f"Failed to clean up product image {product_image_path}: {cleanup_error}")
+                logger.info(f"Keeping uploaded product image for reuse: {product_image_path}")
             
             logger.info(f"Generation completed successfully: {result}")
             return result
@@ -507,19 +454,41 @@ async def generate_banner_async(session_id: str, url: str, mode: str, banner_siz
             raise e
         
     except Exception as e:
-        # Clean up uploaded product image on failure
+        # Keep uploaded product image for potential reuse on failure
+        # Note: Image will be cleaned up when user uploads a new one or session ends
         if product_image_path and os.path.exists(product_image_path):
-            try:
-                os.remove(product_image_path)
-                logger.info(f"Cleaned up uploaded product image after error: {product_image_path}")
-            except Exception as cleanup_error:
-                logger.warning(f"Failed to clean up product image after error {product_image_path}: {cleanup_error}")
+            logger.info(f"Keeping uploaded product image after error for potential reuse: {product_image_path}")
         
         return {
             'status': 'error',
             'error': str(e),
             'progress': 0
         }
+
+
+@app.route('/api/cleanup-image', methods=['POST'])
+def cleanup_uploaded_image():
+    """Clean up uploaded product image"""
+    try:
+        data = request.get_json()
+        image_path = data.get('image_path')
+        
+        if not image_path:
+            return jsonify({'error': 'No image path provided'}), 400
+            
+        if os.path.exists(image_path):
+            try:
+                os.remove(image_path)
+                logger.info(f"Cleaned up uploaded product image: {image_path}")
+                return jsonify({'success': True, 'message': 'Image cleaned up successfully'})
+            except Exception as e:
+                logger.warning(f"Failed to clean up image {image_path}: {e}")
+                return jsonify({'error': f'Failed to clean up image: {str(e)}'}), 500
+        else:
+            return jsonify({'success': True, 'message': 'Image already cleaned up'})
+            
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 
 if __name__ == '__main__':
