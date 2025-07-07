@@ -6,6 +6,7 @@
     <title>AI Banner Maker - Create Professional Marketing Banners</title>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.1/cropper.min.css" rel="stylesheet">
     <style>
         .gradient-bg {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -17,6 +18,62 @@
         }
         .progress-bar {
             transition: width 0.3s ease-in-out;
+        }
+        .drag-handle {
+            cursor: grab;
+            transition: transform 0.2s ease;
+        }
+        .drag-handle:hover {
+            transform: scale(1.05);
+        }
+        .drag-handle:active {
+            cursor: grabbing;
+        }
+        .drop-zone-active {
+            border-color: #3b82f6 !important;
+            background-color: rgba(59, 130, 246, 0.1) !important;
+        }
+        .crop-modal {
+            max-height: 90vh;
+            max-width: 90vw;
+        }
+        .crop-image-container {
+            max-height: 60vh;
+            overflow: hidden;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        .crop-image-container img {
+            max-width: 100%;
+            max-height: 60vh;
+            width: auto;
+            height: auto;
+        }
+        .cropper-container {
+            max-height: 60vh !important;
+        }
+        .cropper-canvas {
+            max-height: 60vh !important;
+        }
+        @media (max-width: 768px) {
+            .crop-modal {
+                max-height: 95vh;
+                max-width: 95vw;
+                margin: 0;
+            }
+            .crop-image-container {
+                max-height: 50vh;
+            }
+            .crop-image-container img {
+                max-height: 50vh;
+            }
+            .cropper-container {
+                max-height: 50vh !important;
+            }
+            .cropper-canvas {
+                max-height: 50vh !important;
+            }
         }
     </style>
 </head>
@@ -79,9 +136,15 @@
                         <label for="url" class="block text-sm font-medium text-gray-700 mb-2">
                             <i class="fas fa-link mr-2"></i>Landing Page URL
                         </label>
-                        <input type="url" id="url" name="url" required 
-                               class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                               placeholder="https://example.com/your-landing-page">
+                        <div class="flex gap-2">
+                            <input type="url" id="url" name="url" required 
+                                   class="flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                   placeholder="https://example.com/your-landing-page">
+                            <button type="button" id="extractImagesBtn" 
+                                    class="px-4 py-3 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                                <i class="fas fa-images mr-2"></i>Extract Images
+                            </button>
+                        </div>
                         <p class="text-sm text-gray-500 mt-1">We'll extract content and images from this page</p>
                     </div>
 
@@ -96,6 +159,7 @@
                                 <i class="fas fa-cloud-upload-alt text-4xl text-gray-400 mb-3"></i>
                                 <p class="text-gray-600">Click to upload or drag and drop</p>
                                 <p class="text-sm text-gray-500 mt-1">PNG, JPG, JPEG up to 16MB</p>
+                                <p class="text-xs text-blue-500 mt-1">💡 Or drag images from "Extracted Images" below</p>
                             </div>
                             <div id="uploadPreview" class="hidden mt-4">
                                 <img id="previewImage" class="max-w-32 max-h-32 mx-auto rounded-lg">
@@ -104,6 +168,19 @@
                             </div>
                         </div>
                         <p class="text-sm text-gray-500 mt-1">Upload your product image for better results, or we'll find one automatically</p>
+                    </div>
+
+                    <!-- Extracted Images Section -->
+                    <div id="extractedImagesSection" class="hidden">
+                        <label class="block text-sm font-medium text-gray-700 mb-2">
+                            <i class="fas fa-image mr-2"></i>Extracted Images
+                        </label>
+                        <div class="border border-gray-200 rounded-lg p-4 max-h-96 overflow-y-auto">
+                            <div id="extractedImagesGrid" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                                <!-- Images will be populated here -->
+                            </div>
+                        </div>
+                        <p class="text-sm text-gray-500 mt-1">Click on an image to view it in full size</p>
                     </div>
 
                     <!-- Banner Configuration -->
@@ -249,6 +326,7 @@
         </div>
     </footer>
 
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.1/cropper.min.js"></script>
     <script src="{{ url_for('static', filename='js/app.js') }}"></script>
 </body>
 </html>

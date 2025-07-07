@@ -6,6 +6,7 @@ class BannerMaker {
         this.uploadedImagePath = null;
         this.pollInterval = null;
         this.currentUrl = null;
+        this.currentTempImage = null; // Track temp images for cleanup
         
         this.initializeEventListeners();
     }
@@ -57,6 +58,11 @@ class BannerMaker {
             }
         });
 
+        // Extract images button
+        document.getElementById('extractImagesBtn').addEventListener('click', () => {
+            this.extractImages();
+        });
+
         // Cleanup on page unload
         window.addEventListener('beforeunload', () => {
             if (this.uploadedImagePath) {
@@ -72,7 +78,6 @@ class BannerMaker {
     initializeFileUpload() {
         const uploadArea = document.getElementById('uploadArea');
         const fileInput = document.getElementById('productImage');
-        const uploadPreview = document.getElementById('uploadPreview');
         const removeButton = document.getElementById('removeImage');
 
         // Click to upload
@@ -80,20 +85,33 @@ class BannerMaker {
             fileInput.click();
         });
 
-        // Drag and drop
+        // Drag and drop for files and extracted images
         uploadArea.addEventListener('dragover', (e) => {
             e.preventDefault();
-            uploadArea.classList.add('border-blue-400', 'bg-blue-50');
+            uploadArea.classList.add('drop-zone-active');
         });
 
         uploadArea.addEventListener('dragleave', () => {
-            uploadArea.classList.remove('border-blue-400', 'bg-blue-50');
+            uploadArea.classList.remove('drop-zone-active');
         });
 
         uploadArea.addEventListener('drop', (e) => {
             e.preventDefault();
-            uploadArea.classList.remove('border-blue-400', 'bg-blue-50');
+            uploadArea.classList.remove('drop-zone-active');
             
+            // Check if it's an extracted image (JSON data)
+            const imageData = e.dataTransfer.getData('text/plain');
+            if (imageData) {
+                try {
+                    const image = JSON.parse(imageData);
+                    this.handleExtractedImageDrop(image);
+                    return;
+                } catch (e) {
+                    // Not JSON, continue with file handling
+                }
+            }
+            
+            // Handle file drop
             const files = e.dataTransfer.files;
             if (files.length > 0) {
                 this.handleFileUpload(files[0]);
@@ -742,6 +760,580 @@ class BannerMaker {
                 infoDiv.remove();
             }
         }, 5000);
+    }
+
+    async extractImages() {
+        const url = document.getElementById('url').value.trim();
+        const extractBtn = document.getElementById('extractImagesBtn');
+        
+        if (!url) {
+            this.showError('Please enter a URL first');
+            return;
+        }
+
+        if (!url.startsWith('http')) {
+            this.showError('Please enter a valid URL starting with http:// or https://');
+            return;
+        }
+
+        try {
+            // Show loading state
+            extractBtn.disabled = true;
+            extractBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Extracting...';
+            
+            // Hide previous results
+            this.hideExtractedImages();
+            
+            // Extract images
+            const response = await fetch('/api/extract-images', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ url: url })
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                this.displayExtractedImages(result.images);
+                this.showSuccessMessage(`Found ${result.count} images from the page`);
+            } else {
+                throw new Error(result.error || 'Failed to extract images');
+            }
+
+        } catch (error) {
+            console.error('Error extracting images:', error);
+            this.showError('Failed to extract images: ' + error.message);
+        } finally {
+            // Reset button state
+            extractBtn.disabled = false;
+            extractBtn.innerHTML = '<i class="fas fa-images mr-2"></i>Extract Images';
+        }
+    }
+
+    displayExtractedImages(images) {
+        const section = document.getElementById('extractedImagesSection');
+        const grid = document.getElementById('extractedImagesGrid');
+        
+        // Clear previous images
+        grid.innerHTML = '';
+        
+        if (images.length === 0) {
+            grid.innerHTML = `
+                <div class="col-span-full text-center text-gray-500 py-8">
+                    <i class="fas fa-images text-3xl mb-3"></i>
+                    <p>No images found on this page</p>
+                </div>
+            `;
+        } else {
+            images.forEach((image) => {
+                const imageDiv = document.createElement('div');
+                imageDiv.className = 'border border-gray-200 rounded-lg p-2 hover:border-blue-300 transition-colors cursor-pointer drag-handle';
+                imageDiv.draggable = true;
+                imageDiv.dataset.imageData = JSON.stringify(image);
+                
+                const dimensionsText = image.width && image.height ? 
+                    `${image.width}×${image.height}` : 'Unknown size';
+                
+                const sizeText = image.size ? 
+                    this.formatFileSize(parseInt(image.size)) : 'Unknown size';
+                
+                imageDiv.innerHTML = `
+                    <img src="${image.src}" 
+                         alt="${image.alt || 'Extracted image'}" 
+                         class="w-full h-24 object-cover rounded mb-2"
+                         loading="lazy"
+                         onerror="this.parentElement.style.display='none'">
+                    <p class="text-xs text-gray-600 truncate mb-1" title="${image.alt || 'No description'}">${image.alt || 'No description'}</p>
+                    <p class="text-xs text-gray-500">${dimensionsText}</p>
+                    <p class="text-xs text-gray-500">${sizeText}</p>
+                    <div class="text-center mt-2">
+                        <span class="inline-flex items-center text-xs text-blue-600">
+                            <i class="fas fa-hand-rock mr-1"></i>
+                            Drag to use or click to crop
+                        </span>
+                    </div>
+                `;
+                
+                // Add drag events
+                imageDiv.addEventListener('dragstart', (e) => {
+                    e.dataTransfer.setData('text/plain', JSON.stringify(image));
+                    e.dataTransfer.effectAllowed = 'copy';
+                });
+                
+                // Add click event to show cropping modal
+                imageDiv.addEventListener('click', () => {
+                    this.showCropModal(image);
+                });
+                
+                grid.appendChild(imageDiv);
+            });
+        }
+        
+        // Show the section
+        section.classList.remove('hidden');
+    }
+
+    hideExtractedImages() {
+        const section = document.getElementById('extractedImagesSection');
+        section.classList.add('hidden');
+    }
+
+    showImageModal(image) {
+        // Create modal
+        const modal = document.createElement('div');
+        modal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4';
+        modal.innerHTML = `
+            <div class="bg-white rounded-lg max-w-4xl max-h-full overflow-auto">
+                <div class="p-4 border-b border-gray-200 flex justify-between items-center">
+                    <h3 class="text-lg font-semibold">Image Details</h3>
+                    <button class="text-gray-500 hover:text-gray-700" onclick="this.closest('.fixed').remove()">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                <div class="p-4">
+                    <img src="${image.src}" 
+                         alt="${image.alt || 'Extracted image'}" 
+                         class="max-w-full max-h-96 mx-auto rounded mb-4">
+                    <div class="space-y-2 text-sm">
+                        <p><strong>Alt Text:</strong> ${image.alt || 'None'}</p>
+                        <p><strong>Title:</strong> ${image.title || 'None'}</p>
+                        <p><strong>Dimensions:</strong> ${image.width && image.height ? `${image.width}×${image.height}` : 'Unknown'}</p>
+                        <p><strong>Size:</strong> ${image.size ? this.formatFileSize(parseInt(image.size)) : 'Unknown'}</p>
+                        <p><strong>Type:</strong> ${image.type}</p>
+                        <p><strong>URL:</strong> <a href="${image.src}" target="_blank" class="text-blue-500 hover:underline break-all">${image.src}</a></p>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        // Add click outside to close
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) {
+                modal.remove();
+            }
+        });
+        
+        document.body.appendChild(modal);
+    }
+
+    async handleExtractedImageDrop(image) {
+        try {
+            // Show preview immediately
+            const previewImage = document.getElementById('previewImage');
+            const uploadedFileName = document.getElementById('uploadedFileName');
+            previewImage.src = image.src;
+            uploadedFileName.textContent = `Extracted: ${image.alt || 'Untitled'}`;
+            document.getElementById('uploadArea').classList.add('hidden');
+            document.getElementById('uploadPreview').classList.remove('hidden');
+
+            // Clean up previous upload if exists
+            if (this.uploadedImagePath) {
+                await this.cleanupUploadedImage(this.uploadedImagePath);
+            }
+
+            // Convert image URL to file and upload
+            await this.downloadAndUploadImage(image.src, image.alt || 'extracted_image');
+            
+            this.showSuccessMessage('Image added from extracted images!');
+            
+        } catch (error) {
+            console.error('Error handling extracted image drop:', error);
+            this.showError('Failed to use extracted image: ' + error.message);
+            this.removeUploadedImage();
+        }
+    }
+
+    async downloadAndUploadImage(imageUrl, filename) {
+        try {
+            // Use final proxy approach - this saves the image permanently
+            const response = await fetch('/api/proxy-image', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ 
+                    url: imageUrl,
+                    filename: filename 
+                })
+            });
+
+            if (!response.ok) {
+                // Fallback: try to fetch directly and upload as blob
+                const imgResponse = await fetch(imageUrl, { mode: 'cors' });
+                if (!imgResponse.ok) {
+                    throw new Error('Failed to download image');
+                }
+                
+                const blob = await imgResponse.blob();
+                const file = new File([blob], `${filename}.jpg`, { type: 'image/jpeg' });
+                await this.handleFileUpload(file);
+                return;
+            }
+
+            const result = await response.json();
+            if (result.success) {
+                this.uploadedImagePath = result.filepath;
+            } else {
+                throw new Error(result.error || 'Upload failed');
+            }
+
+        } catch (error) {
+            console.error('Download and upload error:', error);
+            throw error;
+        }
+    }
+
+    async showCropModal(image) {
+        // Create crop modal with loading state
+        const modal = document.createElement('div');
+        modal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4';
+        modal.innerHTML = `
+            <div class="bg-white rounded-lg crop-modal overflow-hidden flex flex-col">
+                <div class="p-4 border-b border-gray-200 flex justify-between items-center flex-shrink-0">
+                    <h3 class="text-lg font-semibold">Crop Image</h3>
+                    <button id="closeCropModal" class="text-gray-500 hover:text-gray-700">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                <div class="flex-1 p-4 overflow-hidden">
+                    <div id="cropImageContainer" class="crop-image-container mb-4">
+                        <div class="loading-state">
+                            <i class="fas fa-spinner fa-spin text-2xl text-gray-400 mb-2"></i>
+                            <p class="text-gray-600">Loading image for cropping...</p>
+                        </div>
+                    </div>
+                    <div class="flex justify-between items-center flex-shrink-0 mt-4">
+                        <div class="text-sm text-gray-600">
+                            <p><strong>Original:</strong> ${image.width && image.height ? `${image.width}×${image.height}` : 'Unknown'}</p>
+                            <p class="text-xs text-gray-500 mt-1">💡 Mouse wheel to zoom, drag to move image</p>
+                            <p class="text-xs text-gray-500">🎯 Drag corners to resize crop area</p>
+                        </div>
+                        <div class="space-x-2">
+                            <button id="resetCrop" class="px-4 py-2 bg-gray-500 text-white rounded hover:bg-gray-600 disabled:opacity-50" disabled>
+                                <i class="fas fa-undo mr-2"></i>Reset
+                            </button>
+                            <button id="useCropped" class="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:opacity-50" disabled>
+                                <i class="fas fa-check mr-2"></i>Use Cropped Image
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        document.body.appendChild(modal);
+
+        let cropper = null;
+
+        // Close modal function
+        const closeModal = async () => {
+            if (cropper) {
+                cropper.destroy();
+            }
+            // Clean up temp image if it exists
+            if (this.currentTempImage) {
+                await this.cleanupTempImage(this.currentTempImage);
+                this.currentTempImage = null;
+            }
+            modal.remove();
+        };
+
+        // Close button event
+        modal.querySelector('#closeCropModal').addEventListener('click', closeModal);
+
+        // Close modal when clicking outside
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) {
+                closeModal();
+            }
+        });
+
+        try {
+            // Try to load image through our proxy to avoid CORS issues
+            const proxiedImageUrl = await this.getProxiedImageUrl(image.src, image.alt || 'crop_image');
+            
+            // Create image element with the proxied URL
+            const cropImageContainer = modal.querySelector('#cropImageContainer');
+            cropImageContainer.innerHTML = `
+                <img id="cropImage" src="${proxiedImageUrl}" 
+                     alt="${image.alt || 'Image to crop'}" 
+                     crossorigin="anonymous"
+                     style="max-width: 100%; max-height: 60vh; width: auto; height: auto;">
+            `;
+
+            const cropImage = modal.querySelector('#cropImage');
+            
+            // Wait for image to load
+            await new Promise((resolve, reject) => {
+                const timeout = setTimeout(() => {
+                    reject(new Error('Image loading timed out'));
+                }, 10000); // 10 second timeout
+                
+                cropImage.onload = () => {
+                    clearTimeout(timeout);
+                    resolve();
+                };
+                cropImage.onerror = () => {
+                    clearTimeout(timeout);
+                    reject(new Error('Failed to load image'));
+                };
+            });
+
+            // Initialize cropper with responsive settings
+            cropper = new Cropper(cropImage, {
+                aspectRatio: NaN, // Free aspect ratio
+                viewMode: 1, // Restrict crop box not to exceed the size of the canvas
+                dragMode: 'move',
+                autoCropArea: 0.8,
+                restore: false,
+                guides: true,
+                center: true,
+                highlight: false,
+                cropBoxMovable: true,
+                cropBoxResizable: true,
+                toggleDragModeOnDblclick: false,
+                responsive: true,
+                checkOrientation: false,
+                modal: true,
+                background: true,
+                autoCrop: true,
+                movable: true,
+                rotatable: false,
+                scalable: true,
+                zoomable: true,
+                zoomOnTouch: true,
+                zoomOnWheel: true,
+                wheelZoomRatio: 0.1,
+                cropBoxResizable: true,
+                minContainerWidth: 200,
+                minContainerHeight: 100,
+            });
+
+            // Enable buttons
+            const resetBtn = modal.querySelector('#resetCrop');
+            const useBtn = modal.querySelector('#useCropped');
+            resetBtn.disabled = false;
+            useBtn.disabled = false;
+
+            // Reset crop button
+            resetBtn.addEventListener('click', () => {
+                cropper.reset();
+            });
+
+            // Use cropped image button
+            useBtn.addEventListener('click', async () => {
+                try {
+                    useBtn.disabled = true;
+                    useBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Processing...';
+
+                    // Try to get cropped canvas
+                    let canvas;
+                    try {
+                        canvas = cropper.getCroppedCanvas({
+                            maxWidth: 2048,
+                            maxHeight: 2048,
+                            imageSmoothingEnabled: true,
+                            imageSmoothingQuality: 'high',
+                        });
+                    } catch (canvasError) {
+                        console.error('Canvas generation failed:', canvasError);
+                        throw new Error('Cannot crop this image due to CORS restrictions. Try using the original image instead.');
+                    }
+                    
+                    if (!canvas) {
+                        throw new Error('Failed to generate cropped image canvas. This may be due to CORS restrictions.');
+                    }
+                    
+                    // Try to convert to data URL
+                    let croppedDataUrl;
+                    try {
+                        croppedDataUrl = canvas.toDataURL('image/jpeg', 0.9);
+                    } catch (dataUrlError) {
+                        console.error('Data URL conversion failed:', dataUrlError);
+                        throw new Error('Cannot process this image due to security restrictions. Try using the original image instead.');
+                    }
+                    
+                    if (!croppedDataUrl || croppedDataUrl === 'data:,') {
+                        throw new Error('Failed to process cropped image. Try using the original image instead.');
+                    }
+                    
+                    // Upload cropped image
+                    await this.uploadCroppedImage(croppedDataUrl, image.alt || 'cropped_image');
+                    
+                    // Clean up temp image before closing
+                    if (this.currentTempImage) {
+                        await this.cleanupTempImage(this.currentTempImage);
+                        this.currentTempImage = null;
+                    }
+                    
+                    closeModal();
+                    this.showSuccessMessage('Cropped image uploaded successfully!');
+                    
+                } catch (error) {
+                    console.error('Error cropping image:', error);
+                    
+                    // Show user-friendly error message with fallback option
+                    const errorMessage = error.message.includes('CORS') || error.message.includes('security') || error.message.includes('canvas') ?
+                        'This image cannot be cropped due to security restrictions.' :
+                        'Failed to crop image: ' + error.message;
+                    
+                    this.showError(errorMessage + ' You can still use the original image by dragging it to the upload area.');
+                    
+                    useBtn.disabled = false;
+                    useBtn.innerHTML = '<i class="fas fa-check mr-2"></i>Use Cropped Image';
+                }
+            });
+
+        } catch (error) {
+            console.error('Error loading image for cropping:', error);
+            
+            // Show error in modal
+            const cropImageContainer = modal.querySelector('#cropImageContainer');
+            cropImageContainer.innerHTML = `
+                <div class="text-center py-8">
+                    <i class="fas fa-exclamation-triangle text-red-500 text-3xl mb-3"></i>
+                    <p class="text-red-600 mb-2">Failed to load image for cropping</p>
+                    <p class="text-sm text-gray-500">${error.message}</p>
+                    <button id="useOriginal" class="mt-4 px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600">
+                        <i class="fas fa-download mr-2"></i>Use Original Image Instead
+                    </button>
+                </div>
+            `;
+
+            // Use original image button
+            modal.querySelector('#useOriginal').addEventListener('click', async () => {
+                try {
+                    await this.handleExtractedImageDrop(image);
+                    closeModal();
+                } catch (error) {
+                    this.showError('Failed to use original image: ' + error.message);
+                }
+            });
+        }
+    }
+
+    async getProxiedImageUrl(imageUrl, filename) {
+        try {
+            const response = await fetch('/api/proxy-image-temp', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ 
+                    url: imageUrl,
+                    filename: filename 
+                })
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: Failed to proxy image`);
+            }
+
+            const result = await response.json();
+            if (result.success && result.is_temp) {
+                // Store temp filename for cleanup
+                this.currentTempImage = result.temp_filename;
+                // Return a URL to the temporary proxied image
+                return `/api/download-temp/${result.temp_filename}`;
+            } else {
+                throw new Error(result.error || 'Failed to proxy image');
+            }
+
+        } catch (error) {
+            console.error('Error proxying image:', error);
+            // Try original URL with crossOrigin attribute
+            return imageUrl;
+        }
+    }
+
+    async cleanupTempImage(filename) {
+        if (!filename) return;
+        
+        try {
+            await fetch('/api/cleanup-temp', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ filename: filename })
+            });
+        } catch (error) {
+            console.warn('Failed to cleanup temp image:', error);
+        }
+    }
+
+    async uploadCroppedImage(dataUrl, filename) {
+        try {
+            // Clean up previous upload if exists
+            if (this.uploadedImagePath) {
+                await this.cleanupUploadedImage(this.uploadedImagePath);
+            }
+
+            const response = await fetch('/api/upload-cropped', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    image_data: dataUrl,
+                    filename: filename
+                })
+            });
+
+            const result = await response.json();
+            
+            if (result.success) {
+                this.uploadedImagePath = result.filepath;
+                
+                // Show preview
+                const previewImage = document.getElementById('previewImage');
+                const uploadedFileName = document.getElementById('uploadedFileName');
+                previewImage.src = dataUrl;
+                uploadedFileName.textContent = `Cropped: ${filename}`;
+                document.getElementById('uploadArea').classList.add('hidden');
+                document.getElementById('uploadPreview').classList.remove('hidden');
+                
+            } else {
+                throw new Error(result.error || 'Upload failed');
+            }
+
+        } catch (error) {
+            console.error('Error uploading cropped image:', error);
+            throw error;
+        }
+    }
+
+    formatFileSize(bytes) {
+        if (bytes === 0) return '0 Bytes';
+        const k = 1024;
+        const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    }
+
+    showSuccessMessage(message) {
+        const successDiv = document.createElement('div');
+        successDiv.className = 'fixed top-4 right-4 bg-green-500 text-white px-6 py-3 rounded-lg shadow-lg z-50';
+        successDiv.innerHTML = `
+            <div class="flex items-center">
+                <i class="fas fa-check-circle mr-2"></i>
+                <span>${message}</span>
+                <button class="ml-4 text-white hover:text-gray-200" onclick="this.parentElement.parentElement.remove()">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+        `;
+        
+        document.body.appendChild(successDiv);
+        
+        // Auto-remove after 4 seconds
+        setTimeout(() => {
+            if (successDiv.parentElement) {
+                successDiv.remove();
+            }
+        }, 4000);
     }
 }
 

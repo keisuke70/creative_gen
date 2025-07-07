@@ -26,6 +26,14 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from src.lp_scrape import scrape_landing_page, get_page_title_and_description
 from src.gpt_image import generate_unified_creative
 from src.copy_gen import generate_copy_and_visual_prompts, select_best_copy_for_banner
+import requests
+from urllib.parse import urljoin, urlparse
+import re
+from PIL import Image
+import io
+import base64
+import glob
+import atexit
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'banner-maker-secret-key'
@@ -34,6 +42,10 @@ app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 
 # Ensure upload directory exists
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+
+# Create temp folder for cropping images
+app.config['TEMP_FOLDER'] = os.path.join(app.config['UPLOAD_FOLDER'], 'temp')
+os.makedirs(app.config['TEMP_FOLDER'], exist_ok=True)
 
 # Store generation results temporarily
 generation_results = {}
@@ -45,6 +57,38 @@ ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+
+def cleanup_temp_files():
+    """Clean up old temporary files"""
+    try:
+        temp_pattern = os.path.join(app.config['TEMP_FOLDER'], 'temp_*.jpg')
+        temp_files = glob.glob(temp_pattern)
+        
+        current_time = time.time()
+        cleaned_count = 0
+        
+        for temp_file in temp_files:
+            try:
+                # Remove files older than 1 hour
+                if current_time - os.path.getmtime(temp_file) > 3600:
+                    os.remove(temp_file)
+                    cleaned_count += 1
+            except Exception as e:
+                logger.warning(f"Failed to clean up temp file {temp_file}: {e}")
+        
+        if cleaned_count > 0:
+            logger.info(f"Cleaned up {cleaned_count} old temporary files")
+            
+    except Exception as e:
+        logger.error(f"Error during temp file cleanup: {e}")
+
+
+# Register cleanup function to run on app shutdown
+atexit.register(cleanup_temp_files)
+
+# Run initial cleanup
+cleanup_temp_files()
 
 
 def get_cached_scraping_data(url):
@@ -164,6 +208,219 @@ def upload_product_image():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/upload-cropped', methods=['POST'])
+def upload_cropped_image():
+    """Upload cropped image data from canvas"""
+    try:
+        data = request.get_json()
+        image_data = data.get('image_data')
+        original_filename = data.get('filename', 'cropped_image.png')
+        
+        if not image_data:
+            return jsonify({'error': 'No image data provided'}), 400
+        
+        # Remove data URL prefix
+        if image_data.startswith('data:image/'):
+            image_data = image_data.split(',')[1]
+        
+        # Decode base64 image data
+        try:
+            img_bytes = base64.b64decode(image_data)
+        except Exception:
+            return jsonify({'error': 'Invalid image data'}), 400
+        
+        # Validate it's a valid image
+        try:
+            with Image.open(io.BytesIO(img_bytes)) as img:
+                # Convert to RGB if necessary (for PNG with alpha)
+                if img.mode in ('RGBA', 'LA', 'P'):
+                    rgb_img = Image.new('RGB', img.size, (255, 255, 255))
+                    if img.mode == 'P':
+                        img = img.convert('RGBA')
+                    rgb_img.paste(img, mask=img.split()[-1] if img.mode in ('RGBA', 'LA') else None)
+                    img = rgb_img
+                
+                # Generate unique filename
+                unique_filename = f"{uuid.uuid4()}_cropped.jpg"
+                filepath = os.path.join(app.config['UPLOAD_FOLDER'], unique_filename)
+                
+                # Save as JPEG
+                img.save(filepath, 'JPEG', quality=90)
+                
+                return jsonify({
+                    'success': True,
+                    'filepath': filepath,
+                    'filename': unique_filename
+                })
+                
+        except Exception as e:
+            return jsonify({'error': f'Invalid image format: {str(e)}'}), 400
+            
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/proxy-image', methods=['POST'])
+def proxy_image():
+    """Proxy image download to handle CORS issues for final use"""
+    try:
+        data = request.get_json()
+        image_url = data.get('url')
+        filename = data.get('filename', 'downloaded_image')
+        
+        if not image_url:
+            return jsonify({'error': 'No image URL provided'}), 400
+        
+        # Download the image
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        
+        response = requests.get(image_url, headers=headers, timeout=10)
+        response.raise_for_status()
+        
+        # Validate it's an image
+        content_type = response.headers.get('content-type', '')
+        if not content_type.startswith('image/'):
+            return jsonify({'error': 'URL does not point to a valid image'}), 400
+        
+        # Convert to PIL Image and save
+        try:
+            img = Image.open(io.BytesIO(response.content))
+            
+            # Convert to RGB if necessary
+            if img.mode in ('RGBA', 'LA', 'P'):
+                rgb_img = Image.new('RGB', img.size, (255, 255, 255))
+                if img.mode == 'P':
+                    img = img.convert('RGBA')
+                rgb_img.paste(img, mask=img.split()[-1] if img.mode in ('RGBA', 'LA') else None)
+                img = rgb_img
+            
+            # Generate unique filename
+            unique_filename = f"{uuid.uuid4()}_{secure_filename(filename)}.jpg"
+            filepath = os.path.join(app.config['UPLOAD_FOLDER'], unique_filename)
+            
+            # Save as JPEG
+            img.save(filepath, 'JPEG', quality=90)
+            
+            return jsonify({
+                'success': True,
+                'filepath': filepath,
+                'filename': unique_filename
+            })
+            
+        except Exception as e:
+            return jsonify({'error': f'Failed to process image: {str(e)}'}), 400
+            
+    except requests.exceptions.RequestException as e:
+        return jsonify({'error': f'Failed to download image: {str(e)}'}), 400
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/proxy-image-temp', methods=['POST'])
+def proxy_image_temp():
+    """Proxy image download for temporary cropping use only"""
+    try:
+        data = request.get_json()
+        image_url = data.get('url')
+        filename = data.get('filename', 'temp_crop_image')
+        
+        if not image_url:
+            return jsonify({'error': 'No image URL provided'}), 400
+        
+        # Download the image
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        
+        response = requests.get(image_url, headers=headers, timeout=10)
+        response.raise_for_status()
+        
+        # Validate it's an image
+        content_type = response.headers.get('content-type', '')
+        if not content_type.startswith('image/'):
+            return jsonify({'error': 'URL does not point to a valid image'}), 400
+        
+        # Convert to PIL Image and save temporarily
+        try:
+            img = Image.open(io.BytesIO(response.content))
+            
+            # Convert to RGB if necessary
+            if img.mode in ('RGBA', 'LA', 'P'):
+                rgb_img = Image.new('RGB', img.size, (255, 255, 255))
+                if img.mode == 'P':
+                    img = img.convert('RGBA')
+                rgb_img.paste(img, mask=img.split()[-1] if img.mode in ('RGBA', 'LA') else None)
+                img = rgb_img
+            
+            # Generate unique temp filename
+            unique_filename = f"temp_{uuid.uuid4()}_{secure_filename(filename)}.jpg"
+            filepath = os.path.join(app.config['TEMP_FOLDER'], unique_filename)
+            
+            # Save as JPEG in temp folder
+            img.save(filepath, 'JPEG', quality=90)
+            
+            return jsonify({
+                'success': True,
+                'temp_filename': unique_filename,
+                'is_temp': True
+            })
+            
+        except Exception as e:
+            return jsonify({'error': f'Failed to process image: {str(e)}'}), 400
+            
+    except requests.exceptions.RequestException as e:
+        return jsonify({'error': f'Failed to download image: {str(e)}'}), 400
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/download-temp/<filename>')
+def download_temp_image(filename):
+    """Serve temporary proxied images for cropping"""
+    try:
+        # Security check - only allow files in temp folder
+        safe_filename = secure_filename(filename)
+        filepath = os.path.join(app.config['TEMP_FOLDER'], safe_filename)
+        
+        if os.path.exists(filepath) and os.path.commonpath([filepath, app.config['TEMP_FOLDER']]) == app.config['TEMP_FOLDER']:
+            return send_file(filepath)
+        else:
+            return jsonify({'error': 'File not found'}), 404
+            
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/cleanup-temp', methods=['POST'])
+def cleanup_temp_image():
+    """Clean up temporary image file"""
+    try:
+        data = request.get_json()
+        filename = data.get('filename')
+        
+        if not filename:
+            return jsonify({'error': 'No filename provided'}), 400
+            
+        safe_filename = secure_filename(filename)
+        filepath = os.path.join(app.config['TEMP_FOLDER'], safe_filename)
+        
+        if os.path.exists(filepath) and os.path.commonpath([filepath, app.config['TEMP_FOLDER']]) == app.config['TEMP_FOLDER']:
+            try:
+                os.remove(filepath)
+                logger.info(f"Cleaned up temp image: {filepath}")
+                return jsonify({'success': True, 'message': 'Temp image cleaned up successfully'})
+            except Exception as e:
+                logger.warning(f"Failed to clean up temp image {filepath}: {e}")
+                return jsonify({'error': f'Failed to clean up temp image: {str(e)}'}), 500
+        else:
+            return jsonify({'success': True, 'message': 'Temp image already cleaned up'})
+            
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/status/<session_id>')
 def check_status(session_id):
     """Check generation status"""
@@ -275,6 +532,160 @@ def get_copy_variants():
         
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/extract-images', methods=['POST'])
+def extract_images():
+    """Extract images from a URL"""
+    try:
+        data = request.get_json()
+        url = data.get('url')
+        
+        if not url:
+            return jsonify({'error': 'URL is required'}), 400
+        
+        # Extract images from the URL
+        images = extract_images_from_url(url)
+        
+        return jsonify({
+            'success': True,
+            'images': images,
+            'count': len(images)
+        })
+        
+    except Exception as e:
+        logger.error(f"Image extraction error: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+def extract_images_from_url(url: str) -> list:
+    """Extract images from a webpage URL"""
+    try:
+        # Send request to get the HTML
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        response = requests.get(url, headers=headers, timeout=10)
+        response.raise_for_status()
+        
+        # Parse HTML content
+        from selectolax.parser import HTMLParser
+        html = HTMLParser(response.text)
+        
+        # Find all image elements
+        img_elements = html.css('img')
+        images = []
+        
+        for img in img_elements:
+            # Get image source
+            src = img.attributes.get('src')
+            if not src:
+                continue
+                
+            # Convert relative URLs to absolute URLs
+            if src.startswith('//'):
+                src = 'https:' + src
+            elif src.startswith('/'):
+                src = urljoin(url, src)
+            elif not src.startswith('http'):
+                src = urljoin(url, src)
+            
+            # Get image metadata
+            alt = img.attributes.get('alt', '')
+            title = img.attributes.get('title', '')
+            width = img.attributes.get('width')
+            height = img.attributes.get('height')
+            
+            # Try to get image dimensions and size
+            try:
+                img_response = requests.head(src, headers=headers, timeout=5)
+                content_length = img_response.headers.get('content-length')
+                content_type = img_response.headers.get('content-type', '')
+                
+                # Filter out non-image content types
+                if not content_type.startswith('image/'):
+                    continue
+                
+                # Try to get actual image dimensions if not specified
+                if not width or not height:
+                    try:
+                        img_data_response = requests.get(src, headers=headers, timeout=5, stream=True)
+                        img_data_response.raise_for_status()
+                        
+                        # Read only first chunk to get dimensions
+                        img_data = b''
+                        for chunk in img_data_response.iter_content(chunk_size=8192):
+                            img_data += chunk
+                            if len(img_data) > 50000:  # Limit to 50KB for dimension checking
+                                break
+                        
+                        # Try to get dimensions using PIL
+                        try:
+                            with Image.open(io.BytesIO(img_data)) as pil_image:
+                                width, height = pil_image.size
+                        except Exception:
+                            pass
+                    except Exception:
+                        pass
+                
+                # Skip very small images (likely icons/thumbnails)
+                if width and height:
+                    try:
+                        w, h = int(width), int(height)
+                        if w < 100 or h < 100:
+                            continue
+                    except (ValueError, TypeError):
+                        pass
+                
+                image_info = {
+                    'src': src,
+                    'alt': alt,
+                    'title': title,
+                    'width': width,
+                    'height': height,
+                    'size': content_length,
+                    'type': content_type
+                }
+                
+                images.append(image_info)
+                
+            except requests.exceptions.RequestException:
+                # If we can't validate the image, still include it but with basic info
+                image_info = {
+                    'src': src,
+                    'alt': alt,
+                    'title': title,
+                    'width': width,
+                    'height': height,
+                    'size': None,
+                    'type': 'image/unknown'
+                }
+                images.append(image_info)
+        
+        # Sort images by size (largest first) and limit to reasonable number
+        images_with_size = []
+        images_without_size = []
+        
+        for img in images:
+            if img['width'] and img['height']:
+                try:
+                    area = int(img['width']) * int(img['height'])
+                    images_with_size.append((img, area))
+                except (ValueError, TypeError):
+                    images_without_size.append(img)
+            else:
+                images_without_size.append(img)
+        
+        # Sort by area (largest first)
+        images_with_size.sort(key=lambda x: x[1], reverse=True)
+        sorted_images = [img for img, _ in images_with_size] + images_without_size
+        
+        # Limit to first 20 images to avoid overwhelming the UI
+        return sorted_images[:20]
+        
+    except Exception as e:
+        logger.error(f"Error extracting images from {url}: {e}", exc_info=True)
+        raise Exception(f"Failed to extract images: {str(e)}")
 
 
 def run_generation_async(session_id: str, url: str, mode: str, banner_size: str, copy_type: str, product_image_path: Optional[str] = None, skip_copy: bool = False, copy_selection_mode: str = 'auto', selected_copy_index: Optional[int] = None):
