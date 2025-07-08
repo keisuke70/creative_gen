@@ -53,6 +53,18 @@ def generate_copy_and_visual_prompts(
                 "instruction": "Highlight deals, offers, or promotional aspects. Make it sales-focused.",
                 "tone": "promotional and enticing",
                 "visual_theme": "celebratory, eye-catching background with warm lighting and promotional feel"
+            },
+            {
+                "type": "neutral",
+                "instruction": "Create straightforward, factual copy without hype. Focus on clear information.",
+                "tone": "professional and informative",
+                "visual_theme": "minimal, clean background with subtle gradients and professional aesthetic"
+            },
+            {
+                "type": "playful",
+                "instruction": "Use friendly, approachable language that feels personal and engaging.",
+                "tone": "friendly and conversational",
+                "visual_theme": "bright, cheerful background with soft colors and welcoming atmosphere"
             }
         ]
         

@@ -7,61 +7,104 @@ class BannerMaker {
         this.pollInterval = null;
         this.currentUrl = null;
         this.currentTempImage = null; // Track temp images for cleanup
+        this.selectedCopy = null; // Track selected copy
+        this.copyVariants = []; // Store generated copy variants
         
         this.initializeEventListeners();
     }
 
     initializeEventListeners() {
         // Form submission
-        document.getElementById('bannerForm').addEventListener('submit', (e) => {
-            e.preventDefault();
-            this.generateBanner();
-        });
+        const bannerForm = document.getElementById('bannerForm');
+        if (bannerForm) {
+            bannerForm.addEventListener('submit', (e) => {
+                e.preventDefault();
+                this.generateBanner();
+            });
+        }
 
         // File upload
         this.initializeFileUpload();
 
         // Regenerate with same copy button - fastest option
-        document.getElementById('regenerateWithCopyBtn').addEventListener('click', () => {
-            this.regenerateWithSameCopy();
-        });
+        const regenerateWithCopyBtn = document.getElementById('regenerateWithCopyBtn');
+        if (regenerateWithCopyBtn) {
+            regenerateWithCopyBtn.addEventListener('click', () => {
+                this.regenerateWithSameCopy();
+            });
+        }
 
         // Regenerate button - keep current URL and settings
-        document.getElementById('regenerateBtn').addEventListener('click', () => {
-            this.regenerateBanner();
-        });
+        const regenerateBtn = document.getElementById('regenerateBtn');
+        if (regenerateBtn) {
+            regenerateBtn.addEventListener('click', () => {
+                this.regenerateBanner();
+            });
+        }
 
         // Create another button - reset everything
-        document.getElementById('createAnotherBtn').addEventListener('click', () => {
-            this.resetForm();
-        });
+        const createAnotherBtn = document.getElementById('createAnotherBtn');
+        if (createAnotherBtn) {
+            createAnotherBtn.addEventListener('click', () => {
+                this.resetForm();
+            });
+        }
 
         // URL input cache check
         let urlCheckTimeout;
-        document.getElementById('url').addEventListener('input', (e) => {
-            clearTimeout(urlCheckTimeout);
-            urlCheckTimeout = setTimeout(() => {
-                this.checkUrlCacheStatus(e.target.value.trim());
-            }, 1000); // Check after 1 second of no typing
-        });
+        const urlInput = document.getElementById('url');
+        if (urlInput) {
+            urlInput.addEventListener('input', (e) => {
+                clearTimeout(urlCheckTimeout);
+                urlCheckTimeout = setTimeout(() => {
+                    this.checkUrlCacheStatus(e.target.value.trim());
+                }, 1000); // Check after 1 second of no typing
+            });
+        }
 
-        // Copy selection mode change
-        document.getElementById('copySelectionMode').addEventListener('change', (e) => {
-            const isManual = e.target.value === 'manual';
-            this.toggleCopyVariantsSection(isManual);
-            
-            // Reset copy variants display and button when switching modes
-            if (isManual) {
-                this.showCopyVariantsPlaceholder();
-            } else {
-                this.resetGenerateButton();
-            }
-        });
+        // Copy selection mode change (only if element exists)
+        const copySelectionMode = document.getElementById('copySelectionMode');
+        if (copySelectionMode) {
+            copySelectionMode.addEventListener('change', (e) => {
+                const isManual = e.target.value === 'manual';
+                this.toggleCopyVariantsSection(isManual);
+                
+                // Reset copy variants display and button when switching modes
+                if (isManual) {
+                    this.showCopyVariantsPlaceholder();
+                } else {
+                    this.resetGenerateButton();
+                }
+            });
+        }
 
         // Extract images button
-        document.getElementById('extractImagesBtn').addEventListener('click', () => {
-            this.extractImages();
-        });
+        const extractImagesBtn = document.getElementById('extractImagesBtn');
+        if (extractImagesBtn) {
+            extractImagesBtn.addEventListener('click', () => {
+                this.extractImages();
+            });
+        }
+
+        // Generate copy button
+        const generateCopyBtn = document.getElementById('generateCopyBtn');
+        console.log('Generate Copy button element:', generateCopyBtn);
+        if (generateCopyBtn) {
+            generateCopyBtn.addEventListener('click', () => {
+                console.log('Generate Copy button clicked');
+                this.generateCopy();
+            });
+        } else {
+            console.error('Generate Copy button not found!');
+        }
+
+        // Regenerate copy button
+        const regenerateCopyBtn = document.getElementById('regenerateCopyBtn');
+        if (regenerateCopyBtn) {
+            regenerateCopyBtn.addEventListener('click', () => {
+                this.generateCopy();
+            });
+        }
 
         // Cleanup on page unload
         window.addEventListener('beforeunload', () => {
@@ -233,45 +276,21 @@ class BannerMaker {
             return;
         }
 
-        // Store current URL for regeneration
-        this.currentUrl = url;
-
-        const copySelectionMode = document.getElementById('copySelectionMode').value;
-
-        // Handle manual copy selection mode
-        if (copySelectionMode === 'manual' && !this.hasCopyVariantsLoaded()) {
-            // First stage: Load copy variants and wait for selection
-            await this.loadCopyVariantsForSelection(url);
-            return; // Stop here, wait for user selection
-        }
-
-        // Validate copy selection in manual mode
-        if (copySelectionMode === 'manual' && !this.hasValidCopySelection()) {
-            this.showError('Please select a copy variant before generating');
+        // Check if copy has been selected
+        if (!this.selectedCopy) {
+            this.showError('Please generate and select copy first');
             return;
         }
 
-        // Check cache status (unless skip_copy is true)
-        if (!options.skip_copy) {
-            await this.checkCacheStatus(url);
-        }
+        // Store current URL for regeneration
+        this.currentUrl = url;
 
         const formData = {
             url: url,
             banner_size: document.getElementById('bannerSize').value,
-            copy_selection_mode: copySelectionMode,
             product_image_path: this.uploadedImagePath,
             ...options
         };
-
-        // Add copy selection data if in manual mode
-        if (copySelectionMode === 'manual') {
-            formData.selected_copy_index = this.getSelectedCopyIndex();
-            // If copy variants are loaded, skip regenerating copy
-            if (this.hasCopyVariantsLoaded()) {
-                formData.skip_copy = true;
-            }
-        }
 
         try {
             // Show progress section
@@ -466,15 +485,42 @@ class BannerMaker {
         // Clear form
         document.getElementById('url').value = '';
         document.getElementById('bannerSize').value = '1024x1024';
-        document.getElementById('copyType').value = 'auto';
         
         // Reset URL help text
-        const urlHelpText = document.querySelector('#url + p');
-        urlHelpText.innerHTML = "We'll extract content and images from this page";
-        urlHelpText.className = "text-sm text-gray-500 mt-1";
+        const urlHelpText = document.querySelector('#url').parentElement.querySelector('p');
+        if (urlHelpText) {
+            urlHelpText.innerHTML = "We'll extract content and images from this page";
+            urlHelpText.className = "text-sm text-gray-500 mt-1";
+        }
         
         // Remove uploaded image
         this.removeUploadedImage();
+        
+        // Reset copy state
+        this.selectedCopy = null;
+        this.copyVariants = [];
+        document.getElementById('generatedCopySection').classList.add('hidden');
+        
+        // Reset copy status display
+        const statusDisplay = document.getElementById('copyStatusDisplay');
+        statusDisplay.innerHTML = `
+            <span class="text-gray-500">
+                <i class="fas fa-exclamation-triangle mr-2 text-orange-500"></i>
+                Please generate and select copy first
+            </span>
+        `;
+        statusDisplay.className = 'w-full px-4 py-3 border border-gray-300 rounded-lg bg-gray-50';
+        
+        // Disable banner generation again
+        const generateBtn = document.getElementById('generateBtn');
+        const helpText = generateBtn.parentElement.querySelector('p');
+        generateBtn.disabled = true;
+        generateBtn.className = 'bg-gradient-to-r from-gray-400 to-gray-500 text-white px-8 py-4 rounded-lg font-semibold text-lg shadow-lg disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200';
+        
+        if (helpText) {
+            helpText.textContent = 'Please generate and select copy to enable banner generation';
+            helpText.className = 'text-sm text-gray-500 mt-2';
+        }
         
         // Reset session and URL
         this.currentSessionId = null;
@@ -485,7 +531,12 @@ class BannerMaker {
     }
 
     async checkUrlCacheStatus(url) {
-        const urlHelpText = document.querySelector('#url + p');
+        const urlHelpText = document.querySelector('#url').parentElement.querySelector('p');
+        
+        if (!urlHelpText) {
+            console.warn('URL help text element not found');
+            return;
+        }
         
         if (!url || !url.startsWith('http')) {
             urlHelpText.innerHTML = "We'll extract content and images from this page";
@@ -588,11 +639,13 @@ class BannerMaker {
     }
 
     toggleCopyVariantsSection(show) {
-        const section = document.getElementById('copyVariantsSection');
-        if (show) {
-            section.classList.remove('hidden');
-        } else {
-            section.classList.add('hidden');
+        const section = document.getElementById('generatedCopySection');
+        if (section) {
+            if (show) {
+                section.classList.remove('hidden');
+            } else {
+                section.classList.add('hidden');
+            }
         }
     }
 
@@ -635,7 +688,7 @@ class BannerMaker {
     }
 
     displayCopyVariants(variants) {
-        const container = document.getElementById('copyVariantsList');
+        const container = document.getElementById('copyVariantsContainer');
         container.innerHTML = '';
 
         variants.forEach((variant, index) => {
@@ -666,7 +719,7 @@ class BannerMaker {
     }
 
     showCopyVariantsPlaceholder() {
-        const container = document.getElementById('copyVariantsList');
+        const container = document.getElementById('copyVariantsContainer');
         container.innerHTML = `
             <div class="text-center text-gray-500 py-8">
                 <i class="fas fa-pen-fancy text-3xl mb-3"></i>
@@ -676,7 +729,7 @@ class BannerMaker {
     }
 
     showCopyVariantsLoading() {
-        const container = document.getElementById('copyVariantsList');
+        const container = document.getElementById('copyVariantsContainer');
         container.innerHTML = `
             <div class="text-center text-gray-500 py-8">
                 <i class="fas fa-spinner fa-spin text-3xl mb-3"></i>
@@ -687,7 +740,7 @@ class BannerMaker {
     }
 
     showCopyVariantsError(message) {
-        const container = document.getElementById('copyVariantsList');
+        const container = document.getElementById('copyVariantsContainer');
         container.innerHTML = `
             <div class="text-center text-red-500 py-8">
                 <i class="fas fa-exclamation-triangle text-3xl mb-3"></i>
@@ -698,7 +751,7 @@ class BannerMaker {
     }
 
     hasCopyVariantsLoaded() {
-        const container = document.getElementById('copyVariantsList');
+        const container = document.getElementById('copyVariantsContainer');
         return container.querySelector('input[name="copyVariant"]') !== null;
     }
 
@@ -1334,6 +1387,193 @@ class BannerMaker {
                 successDiv.remove();
             }
         }, 4000);
+    }
+
+    async generateCopy() {
+        console.log('generateCopy method called');
+        const url = document.getElementById('url').value.trim();
+        const generateBtn = document.getElementById('generateCopyBtn');
+        
+        console.log('URL:', url);
+        console.log('Generate button:', generateBtn);
+        
+        if (!url) {
+            console.log('No URL provided');
+            this.showError('Please enter a URL first');
+            return;
+        }
+
+        if (!url.startsWith('http')) {
+            this.showError('Please enter a valid URL starting with http:// or https://');
+            return;
+        }
+
+        try {
+            // Show loading state
+            generateBtn.disabled = true;
+            generateBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Generating...';
+            
+            // Generate copy variants
+            const response = await fetch('/api/generate-copy', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ url: url })
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                this.copyVariants = result.variants;
+                this.displayCopyVariants(result.variants);
+                this.showSuccessMessage(`Generated ${result.variants.length} copy variants`);
+            } else {
+                throw new Error(result.error || 'Failed to generate copy');
+            }
+
+        } catch (error) {
+            console.error('Error generating copy:', error);
+            this.showError('Failed to generate copy: ' + error.message);
+        } finally {
+            // Reset button state
+            generateBtn.disabled = false;
+            generateBtn.innerHTML = '<i class="fas fa-pen-fancy mr-2"></i>Generate Copy';
+        }
+    }
+
+    displayCopyVariants(variants) {
+        const section = document.getElementById('generatedCopySection');
+        const container = document.getElementById('copyVariantsContainer');
+        
+        // Clear previous variants
+        container.innerHTML = '';
+        
+        variants.forEach((variant, index) => {
+            const variantDiv = document.createElement('div');
+            variantDiv.className = 'border border-gray-200 rounded-lg p-4 hover:border-blue-300 transition-colors';
+            
+            variantDiv.innerHTML = `
+                <div class="flex items-start justify-between mb-3">
+                    <div class="flex items-center space-x-2">
+                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 capitalize">
+                            ${variant.type}
+                        </span>
+                        <span class="text-xs text-gray-500">${variant.char_count} chars</span>
+                    </div>
+                    <button class="select-copy-btn px-3 py-1 bg-green-500 text-white rounded text-xs hover:bg-green-600 transition-colors" 
+                            data-index="${index}">
+                        Select
+                    </button>
+                </div>
+                <div class="mb-3">
+                    <textarea class="copy-text w-full p-3 border border-gray-300 rounded-lg resize-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500" 
+                              rows="2" 
+                              data-index="${index}">${variant.text}</textarea>
+                </div>
+                <p class="text-xs text-gray-500">${variant.tone}</p>
+            `;
+            
+            container.appendChild(variantDiv);
+        });
+
+        // Add event listeners for select buttons and text changes
+        container.querySelectorAll('.select-copy-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const index = parseInt(e.target.dataset.index);
+                this.selectCopy(index);
+            });
+        });
+
+        container.querySelectorAll('.copy-text').forEach(textarea => {
+            textarea.addEventListener('input', (e) => {
+                const index = parseInt(e.target.dataset.index);
+                this.updateCopyVariant(index, e.target.value);
+            });
+        });
+        
+        // Show the section
+        section.classList.remove('hidden');
+    }
+
+    updateCopyVariant(index, newText) {
+        if (this.copyVariants[index]) {
+            this.copyVariants[index].text = newText;
+            this.copyVariants[index].char_count = newText.length;
+            
+            // Update character count display
+            const container = document.getElementById('copyVariantsContainer');
+            const charCountSpan = container.children[index].querySelector('.text-xs.text-gray-500');
+            charCountSpan.textContent = `${newText.length} chars`;
+        }
+    }
+
+    async selectCopy(index) {
+        if (!this.copyVariants[index]) {
+            this.showError('Invalid copy selection');
+            return;
+        }
+
+        const selectedCopy = this.copyVariants[index];
+        const url = document.getElementById('url').value.trim();
+
+        try {
+            // Save selected copy to backend
+            const response = await fetch('/api/save-selected-copy', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ 
+                    url: url,
+                    selected_copy: selectedCopy
+                })
+            });
+
+            const result = await response.json();
+            if (result.success) {
+                this.selectedCopy = selectedCopy;
+                this.updateCopyStatus(selectedCopy);
+                this.enableBannerGeneration();
+                this.showSuccessMessage('Copy selected successfully!');
+            } else {
+                throw new Error(result.error || 'Failed to save copy selection');
+            }
+
+        } catch (error) {
+            console.error('Error selecting copy:', error);
+            this.showError('Failed to select copy: ' + error.message);
+        }
+    }
+
+    updateCopyStatus(selectedCopy) {
+        const statusDisplay = document.getElementById('copyStatusDisplay');
+        const indicator = document.getElementById('selectedCopyIndicator');
+        
+        statusDisplay.innerHTML = `
+            <span class="text-green-600">
+                <i class="fas fa-check-circle mr-2"></i>
+                Selected: "${selectedCopy.text.substring(0, 50)}${selectedCopy.text.length > 50 ? '...' : ''}"
+            </span>
+        `;
+        statusDisplay.className = 'w-full px-4 py-3 border border-green-300 rounded-lg bg-green-50';
+        
+        if (indicator) {
+            indicator.classList.remove('hidden');
+        }
+    }
+
+    enableBannerGeneration() {
+        const generateBtn = document.getElementById('generateBtn');
+        const helpText = generateBtn.parentElement.querySelector('p');
+        
+        generateBtn.disabled = false;
+        generateBtn.className = 'bg-gradient-to-r from-blue-500 to-purple-600 text-white px-8 py-4 rounded-lg font-semibold text-lg shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-200';
+        
+        if (helpText) {
+            helpText.textContent = 'Ready to generate your AI banner!';
+            helpText.className = 'text-sm text-green-600 mt-2';
+        }
     }
 }
 

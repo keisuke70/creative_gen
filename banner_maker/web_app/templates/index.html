@@ -144,6 +144,10 @@
                                     class="px-4 py-3 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
                                 <i class="fas fa-images mr-2"></i>Extract Images
                             </button>
+                            <button type="button" id="generateCopyBtn" 
+                                    class="px-4 py-3 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                                <i class="fas fa-pen-fancy mr-2"></i>Generate Copy
+                            </button>
                         </div>
                         <p class="text-sm text-gray-500 mt-1">We'll extract content and images from this page</p>
                     </div>
@@ -183,6 +187,32 @@
                         <p class="text-sm text-gray-500 mt-1">Click on an image to view it in full size</p>
                     </div>
 
+                    <!-- Generated Copy Section -->
+                    <div id="generatedCopySection" class="hidden">
+                        <label class="block text-sm font-medium text-gray-700 mb-2">
+                            <i class="fas fa-pen-fancy mr-2"></i>Generated Marketing Copy
+                        </label>
+                        <div class="border border-gray-200 rounded-lg p-4">
+                            <div class="mb-4">
+                                <p class="text-sm text-gray-600 mb-3">Edit and select your preferred marketing copy:</p>
+                            </div>
+                            <div id="copyVariantsContainer" class="space-y-4">
+                                <!-- Copy variants will be populated here -->
+                            </div>
+                            <div class="mt-4 flex justify-between items-center">
+                                <div class="text-sm text-gray-500">
+                                    <span id="selectedCopyIndicator" class="text-green-600 font-medium hidden">
+                                        <i class="fas fa-check-circle mr-1"></i>Copy selected
+                                    </span>
+                                </div>
+                                <button type="button" id="regenerateCopyBtn" 
+                                        class="px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition-colors text-sm">
+                                    <i class="fas fa-redo mr-2"></i>Regenerate Copy
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
                     <!-- Banner Configuration -->
                     <div class="grid md:grid-cols-2 gap-6">
                         
@@ -198,43 +228,30 @@
                             </select>
                         </div>
 
-                        <!-- Copy Selection Mode -->
+                        <!-- Copy Status -->
                         <div>
-                            <label for="copySelectionMode" class="block text-sm font-medium text-gray-700 mb-2">
-                                <i class="fas fa-pen-fancy mr-2"></i>Copy Selection
+                            <label class="block text-sm font-medium text-gray-700 mb-2">
+                                <i class="fas fa-pen-fancy mr-2"></i>Copy Status
                             </label>
-                            <select id="copySelectionMode" name="copySelectionMode" class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
-                                <option value="auto">Auto-Select Best</option>
-                                <option value="manual">Choose From Options</option>
-                            </select>
+                            <div id="copyStatusDisplay" class="w-full px-4 py-3 border border-gray-300 rounded-lg bg-gray-50">
+                                <span class="text-gray-500">
+                                    <i class="fas fa-exclamation-triangle mr-2 text-orange-500"></i>
+                                    Please generate and select copy first
+                                </span>
+                            </div>
                         </div>
                         
                     </div>
 
-                    <!-- Copy Variants Selection (for manual mode) -->
-                    <div id="copyVariantsSection" class="hidden">
-                        <div class="border-t border-gray-200 pt-6">
-                            <h3 class="text-lg font-semibold text-gray-800 mb-4">
-                                <i class="fas fa-list mr-2"></i>Choose Your Copy
-                            </h3>
-                            <p class="text-sm text-gray-600 mb-4">Click "Generate AI Banner" to load copy options, then select your preferred copy:</p>
-                            
-                            <div id="copyVariantsList" class="space-y-3">
-                                <div class="text-center text-gray-500 py-8">
-                                    <i class="fas fa-pen-fancy text-3xl mb-3"></i>
-                                    <p>Copy variants will appear here after entering a URL above</p>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
 
                     <!-- Generate Button -->
                     <div class="text-center">
-                        <button type="submit" id="generateBtn" 
-                                class="bg-gradient-to-r from-blue-500 to-purple-600 text-white px-8 py-4 rounded-lg font-semibold text-lg shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-200">
+                        <button type="submit" id="generateBtn" disabled
+                                class="bg-gradient-to-r from-gray-400 to-gray-500 text-white px-8 py-4 rounded-lg font-semibold text-lg shadow-lg disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200">
                             <i class="fas fa-magic mr-2"></i>
                             Generate AI Banner
                         </button>
+                        <p class="text-sm text-gray-500 mt-2">Please generate and select copy to enable banner generation</p>
                     </div>
                     
                 </form>

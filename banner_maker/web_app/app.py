@@ -151,10 +151,7 @@ def generate_banner():
         url = data.get('url')
         generation_mode = 'unified'  # Only unified mode supported
         banner_size = data.get('banner_size', '1024x1024')
-        copy_type = data.get('copy_type', 'auto')  # auto, benefit, urgency, promo
-        copy_selection_mode = data.get('copy_selection_mode', 'auto')  # auto or manual
-        selected_copy_index = data.get('selected_copy_index')  # for manual selection
-        skip_copy = data.get('skip_copy', False)  # Skip copy generation if cached
+        product_image_path = data.get('product_image_path')
         
         if not url:
             return jsonify({'error': 'URL is required'}), 400
@@ -165,7 +162,7 @@ def generate_banner():
         # Start generation in background
         thread = threading.Thread(
             target=run_generation_async,
-            args=(session_id, url, generation_mode, banner_size, copy_type, data.get('product_image_path'), skip_copy, copy_selection_mode, selected_copy_index)
+            args=(session_id, url, generation_mode, banner_size, product_image_path)
         )
         thread.start()
         
@@ -534,6 +531,85 @@ def get_copy_variants():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/generate-copy', methods=['POST'])
+def generate_copy_variants():
+    """Generate 5 editable copy variants"""
+    try:
+        data = request.get_json()
+        url = data.get('url')
+        
+        if not url:
+            return jsonify({'error': 'URL is required'}), 400
+        
+        # Get page data - scrape if not available
+        cached_page_data = get_cached_scraping_data(url)
+        if not cached_page_data:
+            # Auto-scrape the page
+            import asyncio
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
+            lp_data = loop.run_until_complete(scrape_landing_page(url))
+            page_meta = loop.run_until_complete(get_page_title_and_description(url))
+            
+            # Cache the scraping results
+            cache_scraping_data(url, lp_data, page_meta)
+            
+            loop.close()
+        else:
+            lp_data = cached_page_data['lp_data']
+            page_meta = cached_page_data['page_meta']
+        
+        # Generate 5 copy variants
+        copy_variants = generate_copy_and_visual_prompts(
+            text_content=lp_data['text_content'],
+            title=page_meta['title'],
+            description=page_meta['description']
+        )
+        
+        # Don't cache automatically - let user select first
+        return jsonify({
+            'success': True,
+            'variants': copy_variants,
+            'page_title': page_meta['title'],
+            'page_description': page_meta['description']
+        })
+        
+    except Exception as e:
+        logger.error(f"Copy generation error: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/save-selected-copy', methods=['POST'])
+def save_selected_copy():
+    """Save the user's selected and potentially edited copy"""
+    try:
+        data = request.get_json()
+        url = data.get('url')
+        selected_copy = data.get('selected_copy')
+        
+        if not url or not selected_copy:
+            return jsonify({'error': 'URL and selected copy are required'}), 400
+        
+        # Cache the selected copy for this URL
+        if url not in scraping_cache:
+            scraping_cache[url] = {}
+        
+        scraping_cache[url].update({
+            'selected_copy': selected_copy,
+            'copy_selected_timestamp': time.time()
+        })
+        
+        return jsonify({
+            'success': True,
+            'message': 'Copy selection saved'
+        })
+        
+    except Exception as e:
+        logger.error(f"Save copy error: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/extract-images', methods=['POST'])
 def extract_images():
     """Extract images from a URL"""
@@ -688,7 +764,7 @@ def extract_images_from_url(url: str) -> list:
         raise Exception(f"Failed to extract images: {str(e)}")
 
 
-def run_generation_async(session_id: str, url: str, mode: str, banner_size: str, copy_type: str, product_image_path: Optional[str] = None, skip_copy: bool = False, copy_selection_mode: str = 'auto', selected_copy_index: Optional[int] = None):
+def run_generation_async(session_id: str, url: str, mode: str, banner_size: str, product_image_path: Optional[str] = None):
     """Run banner generation asynchronously"""
     try:
         # Update status
@@ -701,7 +777,7 @@ def run_generation_async(session_id: str, url: str, mode: str, banner_size: str,
         # Run the actual generation
         asyncio.set_event_loop(asyncio.new_event_loop())
         result = asyncio.run(
-            generate_banner_async(session_id, url, mode, banner_size, copy_type, product_image_path, skip_copy, copy_selection_mode, selected_copy_index)
+            generate_banner_async(session_id, url, mode, banner_size, product_image_path)
         )
         
         # Store final result
@@ -716,7 +792,7 @@ def run_generation_async(session_id: str, url: str, mode: str, banner_size: str,
         }
 
 
-async def generate_banner_async(session_id: str, url: str, mode: str, banner_size: str, copy_type: str, product_image_path: Optional[str] = None, skip_copy: bool = False, copy_selection_mode: str = 'auto', selected_copy_index: Optional[int] = None) -> Dict:
+async def generate_banner_async(session_id: str, url: str, mode: str, banner_size: str, product_image_path: Optional[str] = None) -> Dict:
     """Async banner generation with progress updates"""
     try:
         # Parse dimensions
@@ -751,48 +827,20 @@ async def generate_banner_async(session_id: str, url: str, mode: str, banner_siz
         # Update progress: Page scraped
         generation_results[session_id].update({
             'progress': 15,
-            'message': 'Generating marketing copy...'
+            'message': 'Using selected copy...'
         })
         
-        # Handle copy generation/selection
-        if copy_selection_mode == 'manual' and selected_copy_index is not None:
-            # Use manually selected copy
-            cached_copy_data = get_cached_copy_data(url)
-            if cached_copy_data and selected_copy_index < len(cached_copy_data['copy_variants']):
-                copy_variants = cached_copy_data['copy_variants']
-                best_copy = copy_variants[selected_copy_index]
-                logger.info(f"Using manually selected copy variant: {selected_copy_index}")
-            else:
-                raise Exception("Selected copy variant not available")
-        else:
-            # Auto copy selection
-            if skip_copy:
-                # Use cached copy
-                cached_copy_data = get_cached_copy_data(url)
-                if cached_copy_data:
-                    copy_variants = cached_copy_data['copy_variants']
-                    best_copy = cached_copy_data['best_copy']
-                    logger.info("Using cached copy data")
-                else:
-                    raise Exception("No cached copy data available for skip_copy mode")
-            else:
-                # Generate new copy
-                copy_variants = generate_copy_and_visual_prompts(
-                    text_content=lp_data['text_content'],
-                    title=page_meta['title'],
-                    description=page_meta['description']
-                )
-                
-                # Select best copy for banner
-                best_copy = select_best_copy_for_banner(copy_variants, max_chars=60)
-                
-                # Cache the copy results
-                cache_copy_data(url, copy_variants, best_copy)
-                logger.info("Generated and cached new copy variants")
+        # Use pre-selected copy from the separate copy generation step
+        cached_data = get_cached_scraping_data(url)
+        if not cached_data or 'selected_copy' not in cached_data:
+            raise Exception("No copy has been selected. Please generate and select copy first.")
         
-        # Update progress: Copy generated
+        best_copy = cached_data['selected_copy']
+        logger.info(f"Using pre-selected copy: {best_copy['type']}")
+        
+        # Update progress: Copy loaded
         generation_results[session_id].update({
-            'progress': 35,
+            'progress': 25,
             'message': 'Creating banner design...'
         })
         
