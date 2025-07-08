@@ -26,6 +26,14 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from src.lp_scrape import scrape_landing_page, get_page_title_and_description
 from src.gpt_image import generate_unified_creative
 from src.copy_gen import generate_copy_and_visual_prompts, select_best_copy_for_banner
+import requests
+from urllib.parse import urljoin, urlparse
+import re
+from PIL import Image
+import io
+import base64
+import glob
+import atexit
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'banner-maker-secret-key'
@@ -34,6 +42,10 @@ app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 
 # Ensure upload directory exists
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+
+# Create temp folder for cropping images
+app.config['TEMP_FOLDER'] = os.path.join(app.config['UPLOAD_FOLDER'], 'temp')
+os.makedirs(app.config['TEMP_FOLDER'], exist_ok=True)
 
 # Store generation results temporarily
 generation_results = {}
@@ -45,6 +57,38 @@ ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+
+def cleanup_temp_files():
+    """Clean up old temporary files"""
+    try:
+        temp_pattern = os.path.join(app.config['TEMP_FOLDER'], 'temp_*.jpg')
+        temp_files = glob.glob(temp_pattern)
+        
+        current_time = time.time()
+        cleaned_count = 0
+        
+        for temp_file in temp_files:
+            try:
+                # Remove files older than 1 hour
+                if current_time - os.path.getmtime(temp_file) > 3600:
+                    os.remove(temp_file)
+                    cleaned_count += 1
+            except Exception as e:
+                logger.warning(f"Failed to clean up temp file {temp_file}: {e}")
+        
+        if cleaned_count > 0:
+            logger.info(f"Cleaned up {cleaned_count} old temporary files")
+            
+    except Exception as e:
+        logger.error(f"Error during temp file cleanup: {e}")
+
+
+# Register cleanup function to run on app shutdown
+atexit.register(cleanup_temp_files)
+
+# Run initial cleanup
+cleanup_temp_files()
 
 
 def get_cached_scraping_data(url):
@@ -107,10 +151,7 @@ def generate_banner():
         url = data.get('url')
         generation_mode = 'unified'  # Only unified mode supported
         banner_size = data.get('banner_size', '1024x1024')
-        copy_type = data.get('copy_type', 'auto')  # auto, benefit, urgency, promo
-        copy_selection_mode = data.get('copy_selection_mode', 'auto')  # auto or manual
-        selected_copy_index = data.get('selected_copy_index')  # for manual selection
-        skip_copy = data.get('skip_copy', False)  # Skip copy generation if cached
+        product_image_path = data.get('product_image_path')
         
         if not url:
             return jsonify({'error': 'URL is required'}), 400
@@ -121,7 +162,7 @@ def generate_banner():
         # Start generation in background
         thread = threading.Thread(
             target=run_generation_async,
-            args=(session_id, url, generation_mode, banner_size, copy_type, data.get('product_image_path'), skip_copy, copy_selection_mode, selected_copy_index)
+            args=(session_id, url, generation_mode, banner_size, product_image_path)
         )
         thread.start()
         
@@ -159,6 +200,219 @@ def upload_product_image():
             })
         else:
             return jsonify({'error': 'Invalid file type'}), 400
+            
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/upload-cropped', methods=['POST'])
+def upload_cropped_image():
+    """Upload cropped image data from canvas"""
+    try:
+        data = request.get_json()
+        image_data = data.get('image_data')
+        original_filename = data.get('filename', 'cropped_image.png')
+        
+        if not image_data:
+            return jsonify({'error': 'No image data provided'}), 400
+        
+        # Remove data URL prefix
+        if image_data.startswith('data:image/'):
+            image_data = image_data.split(',')[1]
+        
+        # Decode base64 image data
+        try:
+            img_bytes = base64.b64decode(image_data)
+        except Exception:
+            return jsonify({'error': 'Invalid image data'}), 400
+        
+        # Validate it's a valid image
+        try:
+            with Image.open(io.BytesIO(img_bytes)) as img:
+                # Convert to RGB if necessary (for PNG with alpha)
+                if img.mode in ('RGBA', 'LA', 'P'):
+                    rgb_img = Image.new('RGB', img.size, (255, 255, 255))
+                    if img.mode == 'P':
+                        img = img.convert('RGBA')
+                    rgb_img.paste(img, mask=img.split()[-1] if img.mode in ('RGBA', 'LA') else None)
+                    img = rgb_img
+                
+                # Generate unique filename
+                unique_filename = f"{uuid.uuid4()}_cropped.jpg"
+                filepath = os.path.join(app.config['UPLOAD_FOLDER'], unique_filename)
+                
+                # Save as JPEG
+                img.save(filepath, 'JPEG', quality=90)
+                
+                return jsonify({
+                    'success': True,
+                    'filepath': filepath,
+                    'filename': unique_filename
+                })
+                
+        except Exception as e:
+            return jsonify({'error': f'Invalid image format: {str(e)}'}), 400
+            
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/proxy-image', methods=['POST'])
+def proxy_image():
+    """Proxy image download to handle CORS issues for final use"""
+    try:
+        data = request.get_json()
+        image_url = data.get('url')
+        filename = data.get('filename', 'downloaded_image')
+        
+        if not image_url:
+            return jsonify({'error': 'No image URL provided'}), 400
+        
+        # Download the image
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        
+        response = requests.get(image_url, headers=headers, timeout=10)
+        response.raise_for_status()
+        
+        # Validate it's an image
+        content_type = response.headers.get('content-type', '')
+        if not content_type.startswith('image/'):
+            return jsonify({'error': 'URL does not point to a valid image'}), 400
+        
+        # Convert to PIL Image and save
+        try:
+            img = Image.open(io.BytesIO(response.content))
+            
+            # Convert to RGB if necessary
+            if img.mode in ('RGBA', 'LA', 'P'):
+                rgb_img = Image.new('RGB', img.size, (255, 255, 255))
+                if img.mode == 'P':
+                    img = img.convert('RGBA')
+                rgb_img.paste(img, mask=img.split()[-1] if img.mode in ('RGBA', 'LA') else None)
+                img = rgb_img
+            
+            # Generate unique filename
+            unique_filename = f"{uuid.uuid4()}_{secure_filename(filename)}.jpg"
+            filepath = os.path.join(app.config['UPLOAD_FOLDER'], unique_filename)
+            
+            # Save as JPEG
+            img.save(filepath, 'JPEG', quality=90)
+            
+            return jsonify({
+                'success': True,
+                'filepath': filepath,
+                'filename': unique_filename
+            })
+            
+        except Exception as e:
+            return jsonify({'error': f'Failed to process image: {str(e)}'}), 400
+            
+    except requests.exceptions.RequestException as e:
+        return jsonify({'error': f'Failed to download image: {str(e)}'}), 400
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/proxy-image-temp', methods=['POST'])
+def proxy_image_temp():
+    """Proxy image download for temporary cropping use only"""
+    try:
+        data = request.get_json()
+        image_url = data.get('url')
+        filename = data.get('filename', 'temp_crop_image')
+        
+        if not image_url:
+            return jsonify({'error': 'No image URL provided'}), 400
+        
+        # Download the image
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        
+        response = requests.get(image_url, headers=headers, timeout=10)
+        response.raise_for_status()
+        
+        # Validate it's an image
+        content_type = response.headers.get('content-type', '')
+        if not content_type.startswith('image/'):
+            return jsonify({'error': 'URL does not point to a valid image'}), 400
+        
+        # Convert to PIL Image and save temporarily
+        try:
+            img = Image.open(io.BytesIO(response.content))
+            
+            # Convert to RGB if necessary
+            if img.mode in ('RGBA', 'LA', 'P'):
+                rgb_img = Image.new('RGB', img.size, (255, 255, 255))
+                if img.mode == 'P':
+                    img = img.convert('RGBA')
+                rgb_img.paste(img, mask=img.split()[-1] if img.mode in ('RGBA', 'LA') else None)
+                img = rgb_img
+            
+            # Generate unique temp filename
+            unique_filename = f"temp_{uuid.uuid4()}_{secure_filename(filename)}.jpg"
+            filepath = os.path.join(app.config['TEMP_FOLDER'], unique_filename)
+            
+            # Save as JPEG in temp folder
+            img.save(filepath, 'JPEG', quality=90)
+            
+            return jsonify({
+                'success': True,
+                'temp_filename': unique_filename,
+                'is_temp': True
+            })
+            
+        except Exception as e:
+            return jsonify({'error': f'Failed to process image: {str(e)}'}), 400
+            
+    except requests.exceptions.RequestException as e:
+        return jsonify({'error': f'Failed to download image: {str(e)}'}), 400
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/download-temp/<filename>')
+def download_temp_image(filename):
+    """Serve temporary proxied images for cropping"""
+    try:
+        # Security check - only allow files in temp folder
+        safe_filename = secure_filename(filename)
+        filepath = os.path.join(app.config['TEMP_FOLDER'], safe_filename)
+        
+        if os.path.exists(filepath) and os.path.commonpath([filepath, app.config['TEMP_FOLDER']]) == app.config['TEMP_FOLDER']:
+            return send_file(filepath)
+        else:
+            return jsonify({'error': 'File not found'}), 404
+            
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/cleanup-temp', methods=['POST'])
+def cleanup_temp_image():
+    """Clean up temporary image file"""
+    try:
+        data = request.get_json()
+        filename = data.get('filename')
+        
+        if not filename:
+            return jsonify({'error': 'No filename provided'}), 400
+            
+        safe_filename = secure_filename(filename)
+        filepath = os.path.join(app.config['TEMP_FOLDER'], safe_filename)
+        
+        if os.path.exists(filepath) and os.path.commonpath([filepath, app.config['TEMP_FOLDER']]) == app.config['TEMP_FOLDER']:
+            try:
+                os.remove(filepath)
+                logger.info(f"Cleaned up temp image: {filepath}")
+                return jsonify({'success': True, 'message': 'Temp image cleaned up successfully'})
+            except Exception as e:
+                logger.warning(f"Failed to clean up temp image {filepath}: {e}")
+                return jsonify({'error': f'Failed to clean up temp image: {str(e)}'}), 500
+        else:
+            return jsonify({'success': True, 'message': 'Temp image already cleaned up'})
             
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -277,7 +531,240 @@ def get_copy_variants():
         return jsonify({'error': str(e)}), 500
 
 
-def run_generation_async(session_id: str, url: str, mode: str, banner_size: str, copy_type: str, product_image_path: Optional[str] = None, skip_copy: bool = False, copy_selection_mode: str = 'auto', selected_copy_index: Optional[int] = None):
+@app.route('/api/generate-copy', methods=['POST'])
+def generate_copy_variants():
+    """Generate 5 editable copy variants"""
+    try:
+        data = request.get_json()
+        url = data.get('url')
+        
+        if not url:
+            return jsonify({'error': 'URL is required'}), 400
+        
+        # Get page data - scrape if not available
+        cached_page_data = get_cached_scraping_data(url)
+        if not cached_page_data:
+            # Auto-scrape the page
+            import asyncio
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
+            lp_data = loop.run_until_complete(scrape_landing_page(url))
+            page_meta = loop.run_until_complete(get_page_title_and_description(url))
+            
+            # Cache the scraping results
+            cache_scraping_data(url, lp_data, page_meta)
+            
+            loop.close()
+        else:
+            lp_data = cached_page_data['lp_data']
+            page_meta = cached_page_data['page_meta']
+        
+        # Generate 5 copy variants
+        copy_variants = generate_copy_and_visual_prompts(
+            text_content=lp_data['text_content'],
+            title=page_meta['title'],
+            description=page_meta['description']
+        )
+        
+        # Don't cache automatically - let user select first
+        return jsonify({
+            'success': True,
+            'variants': copy_variants,
+            'page_title': page_meta['title'],
+            'page_description': page_meta['description']
+        })
+        
+    except Exception as e:
+        logger.error(f"Copy generation error: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/save-selected-copy', methods=['POST'])
+def save_selected_copy():
+    """Save the user's selected and potentially edited copy"""
+    try:
+        data = request.get_json()
+        url = data.get('url')
+        selected_copy = data.get('selected_copy')
+        
+        if not url or not selected_copy:
+            return jsonify({'error': 'URL and selected copy are required'}), 400
+        
+        # Cache the selected copy for this URL
+        if url not in scraping_cache:
+            scraping_cache[url] = {}
+        
+        scraping_cache[url].update({
+            'selected_copy': selected_copy,
+            'copy_selected_timestamp': time.time()
+        })
+        
+        return jsonify({
+            'success': True,
+            'message': 'Copy selection saved'
+        })
+        
+    except Exception as e:
+        logger.error(f"Save copy error: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/extract-images', methods=['POST'])
+def extract_images():
+    """Extract images from a URL"""
+    try:
+        data = request.get_json()
+        url = data.get('url')
+        
+        if not url:
+            return jsonify({'error': 'URL is required'}), 400
+        
+        # Extract images from the URL
+        images = extract_images_from_url(url)
+        
+        return jsonify({
+            'success': True,
+            'images': images,
+            'count': len(images)
+        })
+        
+    except Exception as e:
+        logger.error(f"Image extraction error: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+def extract_images_from_url(url: str) -> list:
+    """Extract images from a webpage URL"""
+    try:
+        # Send request to get the HTML
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        response = requests.get(url, headers=headers, timeout=10)
+        response.raise_for_status()
+        
+        # Parse HTML content
+        from selectolax.parser import HTMLParser
+        html = HTMLParser(response.text)
+        
+        # Find all image elements
+        img_elements = html.css('img')
+        images = []
+        
+        for img in img_elements:
+            # Get image source
+            src = img.attributes.get('src')
+            if not src:
+                continue
+                
+            # Convert relative URLs to absolute URLs
+            if src.startswith('//'):
+                src = 'https:' + src
+            elif src.startswith('/'):
+                src = urljoin(url, src)
+            elif not src.startswith('http'):
+                src = urljoin(url, src)
+            
+            # Get image metadata
+            alt = img.attributes.get('alt', '')
+            title = img.attributes.get('title', '')
+            width = img.attributes.get('width')
+            height = img.attributes.get('height')
+            
+            # Try to get image dimensions and size
+            try:
+                img_response = requests.head(src, headers=headers, timeout=5)
+                content_length = img_response.headers.get('content-length')
+                content_type = img_response.headers.get('content-type', '')
+                
+                # Filter out non-image content types
+                if not content_type.startswith('image/'):
+                    continue
+                
+                # Try to get actual image dimensions if not specified
+                if not width or not height:
+                    try:
+                        img_data_response = requests.get(src, headers=headers, timeout=5, stream=True)
+                        img_data_response.raise_for_status()
+                        
+                        # Read only first chunk to get dimensions
+                        img_data = b''
+                        for chunk in img_data_response.iter_content(chunk_size=8192):
+                            img_data += chunk
+                            if len(img_data) > 50000:  # Limit to 50KB for dimension checking
+                                break
+                        
+                        # Try to get dimensions using PIL
+                        try:
+                            with Image.open(io.BytesIO(img_data)) as pil_image:
+                                width, height = pil_image.size
+                        except Exception:
+                            pass
+                    except Exception:
+                        pass
+                
+                # Skip very small images (likely icons/thumbnails)
+                if width and height:
+                    try:
+                        w, h = int(width), int(height)
+                        if w < 100 or h < 100:
+                            continue
+                    except (ValueError, TypeError):
+                        pass
+                
+                image_info = {
+                    'src': src,
+                    'alt': alt,
+                    'title': title,
+                    'width': width,
+                    'height': height,
+                    'size': content_length,
+                    'type': content_type
+                }
+                
+                images.append(image_info)
+                
+            except requests.exceptions.RequestException:
+                # If we can't validate the image, still include it but with basic info
+                image_info = {
+                    'src': src,
+                    'alt': alt,
+                    'title': title,
+                    'width': width,
+                    'height': height,
+                    'size': None,
+                    'type': 'image/unknown'
+                }
+                images.append(image_info)
+        
+        # Sort images by size (largest first) and limit to reasonable number
+        images_with_size = []
+        images_without_size = []
+        
+        for img in images:
+            if img['width'] and img['height']:
+                try:
+                    area = int(img['width']) * int(img['height'])
+                    images_with_size.append((img, area))
+                except (ValueError, TypeError):
+                    images_without_size.append(img)
+            else:
+                images_without_size.append(img)
+        
+        # Sort by area (largest first)
+        images_with_size.sort(key=lambda x: x[1], reverse=True)
+        sorted_images = [img for img, _ in images_with_size] + images_without_size
+        
+        # Limit to first 20 images to avoid overwhelming the UI
+        return sorted_images[:20]
+        
+    except Exception as e:
+        logger.error(f"Error extracting images from {url}: {e}", exc_info=True)
+        raise Exception(f"Failed to extract images: {str(e)}")
+
+
+def run_generation_async(session_id: str, url: str, mode: str, banner_size: str, product_image_path: Optional[str] = None):
     """Run banner generation asynchronously"""
     try:
         # Update status
@@ -287,17 +774,17 @@ def run_generation_async(session_id: str, url: str, mode: str, banner_size: str,
             'message': 'Starting generation...'
         }
         
-        # Run the async generation
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        
-        result = loop.run_until_complete(
-            generate_banner_async(session_id, url, mode, banner_size, copy_type, product_image_path, skip_copy, copy_selection_mode, selected_copy_index)
+        # Run the actual generation
+        asyncio.set_event_loop(asyncio.new_event_loop())
+        result = asyncio.run(
+            generate_banner_async(session_id, url, mode, banner_size, product_image_path)
         )
         
+        # Store final result
         generation_results[session_id] = result
         
     except Exception as e:
+        logger.error(f"Generation failed: {e}", exc_info=True)
         generation_results[session_id] = {
             'status': 'error',
             'error': str(e),
@@ -305,186 +792,108 @@ def run_generation_async(session_id: str, url: str, mode: str, banner_size: str,
         }
 
 
-async def generate_banner_async(session_id: str, url: str, mode: str, banner_size: str, copy_type: str, product_image_path: Optional[str] = None, skip_copy: bool = False, copy_selection_mode: str = 'auto', selected_copy_index: Optional[int] = None) -> Dict:
+async def generate_banner_async(session_id: str, url: str, mode: str, banner_size: str, product_image_path: Optional[str] = None) -> Dict:
     """Async banner generation with progress updates"""
     try:
-        logger.info(f"Starting banner generation for session {session_id}")
-        logger.info(f"URL: {url}, Mode: {mode}, Size: {banner_size}, Copy type: {copy_type}")
-        
         # Parse dimensions
-        width, height = map(int, banner_size.split('x'))
-        output_dir = os.path.join(app.config['UPLOAD_FOLDER'], session_id)
-        os.makedirs(output_dir, exist_ok=True)
-        logger.info(f"Output directory: {output_dir}")
-        
-        # Step 1: Check cache or scrape landing page
-        cached_data = get_cached_scraping_data(url)
-        if cached_data:
-            generation_results[session_id]['progress'] = 10
-            generation_results[session_id]['message'] = 'Using cached page data...'
-            logger.info(f"Using cached scraping data for URL: {url}")
-            
-            lp_data = cached_data['lp_data']
-            page_meta = cached_data['page_meta']
+        if 'x' in banner_size:
+            width, height = map(int, banner_size.split('x'))
         else:
-            generation_results[session_id]['progress'] = 10
-            generation_results[session_id]['message'] = 'Scraping landing page...'
-            logger.info(f"Scraping fresh data for URL: {url}")
-            
+            width = height = 1024
+        
+        # Update progress: Starting
+        generation_results[session_id].update({
+            'progress': 5,
+            'message': 'Analyzing landing page...'
+        })
+        
+        # Check cache first for scraping data
+        cached_scraping_data = get_cached_scraping_data(url)
+        
+        if cached_scraping_data:
+            lp_data = cached_scraping_data['lp_data']
+            page_meta = cached_scraping_data['page_meta']
+            logger.info(f"Using cached scraping data for {url}")
+        else:
+            # Scrape landing page
+            logger.info(f"Scraping landing page: {url}")
             lp_data = await scrape_landing_page(url)
             page_meta = await get_page_title_and_description(url)
             
-            # Cache the results
+            # Cache the scraping results
             cache_scraping_data(url, lp_data, page_meta)
-            logger.info(f"Cached scraping data for URL: {url}")
+            logger.info(f"Cached scraping data for {url}")
         
-        # Step 2: Check cache or generate copy and visual prompts
-        cached_copy_data = get_cached_copy_data(url)
-        if cached_copy_data and cached_copy_data['copy_variants']:
-            generation_results[session_id]['progress'] = 20
-            generation_results[session_id]['message'] = 'Using cached copy data...'
-            logger.info(f"Using cached copy data for URL: {url}")
-            
-            copy_variants = cached_copy_data['copy_variants']
-            
-            # Handle copy selection from cached data
-            if copy_selection_mode == 'manual':
-                if selected_copy_index is not None:
-                    # Use manually selected copy from cached variants
-                    if 0 <= selected_copy_index < len(copy_variants):
-                        best_copy = copy_variants[selected_copy_index]
-                        logger.info(f"Using manually selected copy (index {selected_copy_index}): {best_copy['text']}")
-                        # Update cache with selected copy
-                        cache_copy_data(url, copy_variants, best_copy)
-                    else:
-                        best_copy = copy_variants[0]  # Fallback to first variant
-                        logger.warning(f"Invalid copy index {selected_copy_index}, using first variant")
-                        # Update cache with fallback copy
-                        cache_copy_data(url, copy_variants, best_copy)
-                else:
-                    # Manual mode but no selection made - return variants for selection
-                    logger.info("Manual mode with cached data: stopping generation to wait for copy selection")
-                    generation_results[session_id]['progress'] = 30
-                    generation_results[session_id]['message'] = 'Copy variants available. Please select your preferred copy.'
-                    
-                    return {
-                        'status': 'copy_selection_required',
-                        'copy_variants': copy_variants,
-                        'session_id': session_id,
-                        'message': 'Please select a copy variant to continue generation'
-                    }
-            else:
-                # Auto mode - use cached best_copy or select automatically
-                if cached_copy_data['best_copy']:
-                    best_copy = cached_copy_data['best_copy']
-                else:
-                    best_copy = select_best_copy_for_banner(copy_variants, max_chars=60)
-        else:
-            generation_results[session_id]['progress'] = 20
-            generation_results[session_id]['message'] = 'Generating marketing copy...'
-            
-            copy_variants = generate_copy_and_visual_prompts(
-                text_content=lp_data['text_content'],
-                title=page_meta['title'],
-                description=page_meta['description']
-            )
-            
-            # Handle manual copy selection mode - stop here if no selection made
-            if copy_selection_mode == 'manual':
-                if selected_copy_index is None:
-                    # First generation in manual mode - return copy variants for selection
-                    logger.info("Manual mode: stopping generation to wait for copy selection")
-                    generation_results[session_id]['progress'] = 30
-                    generation_results[session_id]['message'] = 'Copy variants generated. Please select your preferred copy.'
-                    
-                    # Cache the copy results without best_copy selection
-                    cache_copy_data(url, copy_variants, None)
-                    
-                    return {
-                        'status': 'copy_selection_required',
-                        'copy_variants': copy_variants,
-                        'session_id': session_id,
-                        'message': 'Please select a copy variant to continue generation'
-                    }
-                else:
-                    # Use manually selected copy
-                    if 0 <= selected_copy_index < len(copy_variants):
-                        best_copy = copy_variants[selected_copy_index]
-                    else:
-                        best_copy = copy_variants[0]  # Fallback to first variant
-            elif copy_type != 'auto':
-                # Filter for specific copy type
-                selected_variants = [v for v in copy_variants if v['type'] == copy_type]
-                if selected_variants:
-                    best_copy = selected_variants[0]
-                else:
-                    best_copy = copy_variants[0]
-            else:
-                best_copy = select_best_copy_for_banner(copy_variants, max_chars=60)
-            
-            # Cache the copy results
-            cache_copy_data(url, copy_variants, best_copy)
-            logger.info(f"Cached copy data for URL: {url}")
+        # Update progress: Page scraped
+        generation_results[session_id].update({
+            'progress': 15,
+            'message': 'Using selected copy...'
+        })
         
-        banner_path = os.path.join(output_dir, 'banner.png')
+        # Use pre-selected copy from the separate copy generation step
+        cached_data = get_cached_scraping_data(url)
+        if not cached_data or 'selected_copy' not in cached_data:
+            raise Exception("No copy has been selected. Please generate and select copy first.")
         
-        # Step 3: Unified AI generation with comprehensive prompt
-        logger.info("Using unified AI generation mode")
-        generation_results[session_id]['progress'] = 40
-        generation_results[session_id]['message'] = 'Generating complete creative with AI...'
+        best_copy = cached_data['selected_copy']
+        logger.info(f"Using pre-selected copy: {best_copy['type']}")
         
-        logger.info(f"Unified generation params: copy='{best_copy['text']}', type='{best_copy['type']}'")
-        unified_result = await generate_unified_creative(
+        # Update progress: Copy loaded
+        generation_results[session_id].update({
+            'progress': 25,
+            'message': 'Creating banner design...'
+        })
+        
+        # Generate banner path
+        session_folder = os.path.join(app.config['UPLOAD_FOLDER'], session_id)
+        os.makedirs(session_folder, exist_ok=True)
+        banner_path = os.path.join(session_folder, 'banner.png')
+        
+        # Update progress: Starting banner generation
+        generation_results[session_id].update({
+            'progress': 50,
+            'message': 'Generating banner with AI...'
+        })
+        
+        # Generate banner
+        banner_result = await generate_unified_creative(
             copy_text=best_copy['text'],
             copy_type=best_copy['type'],
-            background_prompt=best_copy.get('background_prompt', ''),
-            brand_context=page_meta['title'],
-            product_context=lp_data['text_content'][:500],
+            background_prompt=lp_data.get('visual_elements', ''),
+            brand_context=f"{page_meta['title']} - {page_meta['description']}",
+            product_context=lp_data.get('text_content', '')[:500],
             dimensions=(width, height),
             output_path=banner_path,
             product_image_path=product_image_path
         )
         
-        logger.info(f"Unified generation result: {unified_result}")
-        if not unified_result['success']:
-            error_msg = f"Unified generation failed: {unified_result['error']}"
-            logger.error(error_msg)
-            raise Exception(error_msg)
+        if not banner_result.get('success'):
+            raise Exception(f"Banner generation failed: {banner_result.get('error', 'Unknown error')}")
         
-        image_source = "GPT_UNIFIED"
-        logger.info(f"Unified creative saved to: {banner_path}")
+        # Update progress: Banner generated
+        generation_results[session_id].update({
+            'progress': 85,
+            'message': 'Finalizing banner...'
+        })
         
-        # Step 6: Generate HTML/CSS
-        generation_results[session_id]['progress'] = 90
-        generation_results[session_id]['message'] = 'Generating web assets...'
+        # Determine image source
+        image_source = "Product image + AI background" if product_image_path else "AI generated"
         
-        try:
-            logger.info("Starting HTML/CSS generation...")
-            from src.export_html import generate_banner_html_css
-            html_result = generate_banner_html_css(
-                banner_image_path=banner_path,
-                copy_text=best_copy['text'],
-                banner_size=(width, height),
-                output_dir=output_dir
-            )
-            logger.info(f"HTML/CSS generation result: {html_result}")
-        except Exception as e:
-            logger.error(f"HTML/CSS generation failed: {e}", exc_info=True)
-            html_result = {'success': False, 'error': str(e)}
+        # Update progress: Completed
+        generation_results[session_id].update({
+            'progress': 100,
+            'message': 'Banner completed!'
+        })
         
-        # Complete
-        logger.info("Finalizing banner generation...")
-        generation_results[session_id]['progress'] = 100
-        generation_results[session_id]['message'] = 'Banner generated successfully!'
-        
+        # Prepare final result
         try:
             result = {
                 'status': 'completed',
                 'progress': 100,
                 'message': 'Banner generated successfully!',
                 'banner_path': banner_path,
-                'html_path': html_result.get('html_path') if html_result.get('success') else None,
-                'css_path': html_result.get('css_path') if html_result.get('success') else None,
+                'html_path': None,  # HTML generation not implemented in unified mode
+                'css_path': None,   # CSS generation not implemented in unified mode
                 'image_source': image_source,
                 'copy_used': best_copy,
                 'banner_url': f'/api/download/{session_id}/banner',  # Direct URL instead of url_for
@@ -492,13 +901,10 @@ async def generate_banner_async(session_id: str, url: str, mode: str, banner_siz
                 'dimensions': f"{width}x{height}"
             }
             
-            # Clean up uploaded product image after successful generation
+            # Keep uploaded product image for potential reuse
+            # Note: Image will be cleaned up when user uploads a new one or session ends
             if product_image_path and os.path.exists(product_image_path):
-                try:
-                    os.remove(product_image_path)
-                    logger.info(f"Cleaned up uploaded product image: {product_image_path}")
-                except Exception as cleanup_error:
-                    logger.warning(f"Failed to clean up product image {product_image_path}: {cleanup_error}")
+                logger.info(f"Keeping uploaded product image for reuse: {product_image_path}")
             
             logger.info(f"Generation completed successfully: {result}")
             return result
@@ -507,19 +913,41 @@ async def generate_banner_async(session_id: str, url: str, mode: str, banner_siz
             raise e
         
     except Exception as e:
-        # Clean up uploaded product image on failure
+        # Keep uploaded product image for potential reuse on failure
+        # Note: Image will be cleaned up when user uploads a new one or session ends
         if product_image_path and os.path.exists(product_image_path):
-            try:
-                os.remove(product_image_path)
-                logger.info(f"Cleaned up uploaded product image after error: {product_image_path}")
-            except Exception as cleanup_error:
-                logger.warning(f"Failed to clean up product image after error {product_image_path}: {cleanup_error}")
+            logger.info(f"Keeping uploaded product image after error for potential reuse: {product_image_path}")
         
         return {
             'status': 'error',
             'error': str(e),
             'progress': 0
         }
+
+
+@app.route('/api/cleanup-image', methods=['POST'])
+def cleanup_uploaded_image():
+    """Clean up uploaded product image"""
+    try:
+        data = request.get_json()
+        image_path = data.get('image_path')
+        
+        if not image_path:
+            return jsonify({'error': 'No image path provided'}), 400
+            
+        if os.path.exists(image_path):
+            try:
+                os.remove(image_path)
+                logger.info(f"Cleaned up uploaded product image: {image_path}")
+                return jsonify({'success': True, 'message': 'Image cleaned up successfully'})
+            except Exception as e:
+                logger.warning(f"Failed to clean up image {image_path}: {e}")
+                return jsonify({'error': f'Failed to clean up image: {str(e)}'}), 500
+        else:
+            return jsonify({'success': True, 'message': 'Image already cleaned up'})
+            
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 
 if __name__ == '__main__':

@@ -32,7 +32,8 @@ def generate_copy_and_visual_prompts(
         Brand Context: {brand_context}
         """.strip()
         
-        system_prompt = """You are an expert marketing copywriter. Generate concise, compelling banner copy that drives action. Each variant should be 1-2 short sentences max, suitable for banner overlays."""
+        system_prompt = """君は最良のコピーライターだ. ユーザーのクリックを引き出す、正確で・競争力のある広告バナー向けコピーを作って欲しい。広告バナー画像に適切にオーバーレイできる2文以下の短いセンテンスを生成すること。"""
+        #system_prompt = """You are an expert marketing copywriter. Generate concise, compelling banner copy that drives action. Each variant should be 1-2 short sentences max, suitable for banner overlays."""
         
         # Define copy variants with specific instructions and visual themes
         copy_variants = [
@@ -53,6 +54,18 @@ def generate_copy_and_visual_prompts(
                 "instruction": "Highlight deals, offers, or promotional aspects. Make it sales-focused.",
                 "tone": "promotional and enticing",
                 "visual_theme": "celebratory, eye-catching background with warm lighting and promotional feel"
+            },
+            {
+                "type": "neutral",
+                "instruction": "Create straightforward, factual copy without hype. Focus on clear information.",
+                "tone": "professional and informative",
+                "visual_theme": "minimal, clean background with subtle gradients and professional aesthetic"
+            },
+            {
+                "type": "playful",
+                "instruction": "Use friendly, approachable language that feels personal and engaging.",
+                "tone": "friendly and conversational",
+                "visual_theme": "bright, cheerful background with soft colors and welcoming atmosphere"
             }
         ]
         
