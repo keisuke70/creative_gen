@@ -26,6 +26,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from src.lp_scrape import scrape_landing_page, get_page_title_and_description
 from src.gpt_image import generate_unified_creative
 from src.copy_gen import generate_copy_and_visual_prompts, select_best_copy_for_banner
+from src.canva_oauth import init_canva_oauth, get_authenticated_api, require_canva_auth
 import requests
 from urllib.parse import urljoin, urlparse
 import re
@@ -90,6 +91,9 @@ atexit.register(cleanup_temp_files)
 # Run initial cleanup
 cleanup_temp_files()
 
+# Initialize Canva OAuth
+init_canva_oauth(app)
+
 
 def get_cached_scraping_data(url):
     """Get cached scraping data for a URL"""
@@ -143,36 +147,132 @@ def index():
     return render_template('index.html')
 
 
+@app.route('/debug/routes')
+def debug_routes():
+    """Debug route to show all registered routes"""
+    routes = []
+    for rule in app.url_map.iter_rules():
+        routes.append({
+            'route': rule.rule,
+            'methods': list(rule.methods),
+            'endpoint': rule.endpoint
+        })
+    return jsonify({'routes': routes})
+
+
 @app.route('/api/generate', methods=['POST'])
+@require_canva_auth
 def generate_banner():
-    """Generate banner from LP URL and optional product image"""
+    """Generate banner using Canva pipeline"""
     try:
+        from src.layout_orchestrator import build_banner, AdSize, Product, CopyTriple
+        from src.background_gen import maybe_generate_background
+        
         data = request.get_json()
-        url = data.get('url')
-        generation_mode = 'unified'  # Only unified mode supported
-        banner_size = data.get('banner_size', '1024x1024')
+        product_id = data.get('product_id')  # For database lookup
+        url = data.get('url')  # Fallback for direct URL processing
+        size_key = data.get('size', 'MD_RECT')
+        variant_idx = data.get('variant_idx', 0)
         product_image_path = data.get('product_image_path')
         
+        # Validate ad size
+        if size_key not in AdSize.__members__:
+            return jsonify({'error': f'Invalid size: {size_key}'}), 400
+        
+        ad_size = AdSize[size_key]
+        
+        # For now, use direct parameters instead of database
+        # TODO: Implement proper database integration
         if not url:
             return jsonify({'error': 'URL is required'}), 400
         
-        # Generate unique session ID
-        session_id = str(uuid.uuid4())
+        # Get cached data (existing functionality)
+        cached_data = get_cached_scraping_data(url)
+        if not cached_data or 'selected_copy' not in cached_data:
+            return jsonify({'error': 'No copy has been selected. Please generate and select copy first.'}), 400
         
-        # Start generation in background
-        thread = threading.Thread(
-            target=run_generation_async,
-            args=(session_id, url, generation_mode, banner_size, product_image_path)
+        selected_copy = cached_data['selected_copy']
+        
+        # Create copy triple from selected copy
+        copy = CopyTriple(
+            headline=selected_copy.get('text', '').split('\n')[0][:50],  # First line as headline
+            subline=selected_copy.get('text', '').split('\n')[1] if '\n' in selected_copy.get('text', '') else 'Quality you can trust',
+            cta='Learn More'
         )
-        thread.start()
+        
+        # Get authenticated Canva API instance
+        api = get_authenticated_api()
+        if not api:
+            return jsonify({'error': 'Canva authentication required'}), 401
+        
+        # Upload product image to Canva if provided
+        hero_asset_id = None
+        if product_image_path and os.path.exists(product_image_path):
+            try:
+                with open(product_image_path, 'rb') as f:
+                    image_data = f.read()
+                
+                # Determine MIME type
+                import mimetypes
+                mime_type, _ = mimetypes.guess_type(product_image_path)
+                if not mime_type or not mime_type.startswith('image/'):
+                    mime_type = 'image/jpeg'
+                
+                hero_asset_id = api.upload_binary(
+                    image_data,
+                    os.path.basename(product_image_path),
+                    mime_type
+                )
+                logger.info(f"Successfully uploaded image as asset: {hero_asset_id}")
+                
+            except Exception as e:
+                logger.warning(f"Asset upload failed: {e}")
+                logger.info("Continuing with text-only banner generation")
+                # Continue with hero_asset_id = None for text-only banner
+        
+        # Note: We no longer require the product image - can create text-only banners
+        
+        # Create product object
+        product = Product(
+            hero_asset_id=hero_asset_id,
+            palette=['#FF6B35', '#004225']  # Default palette
+        )
+        
+        # Generate background if needed
+        bg_asset_id = maybe_generate_background(product, api)
+        
+        # Build banner with authenticated API
+        result = build_banner(product, ad_size, copy, bg_asset_id, api)
+        
+        # Import template map for dimensions
+        from src.templates import TEMPLATE_MAP
+        
+        # Store result for download (reuse existing session storage)
+        session_id = str(uuid.uuid4())
+        generation_results[session_id] = {
+            'status': 'completed',
+            'design_id': result.design_id,
+            'export_url': result.export_url,
+            'html_snippet': result.html_snippet,
+            'banner_url': result.export_url,
+            'generation_mode': 'canva',
+            'dimensions': f"{TEMPLATE_MAP[ad_size].canvas_w}x{TEMPLATE_MAP[ad_size].canvas_h}"
+        }
         
         return jsonify({
             'session_id': session_id,
-            'status': 'started',
-            'message': 'Banner generation started'
+            'design_id': result.design_id,
+            'export_url': result.export_url,
+            'html': result.html_snippet,
+            'status': 'completed'
         })
         
     except Exception as e:
+        # Handle rate limiting
+        if '429' in str(e):
+            return jsonify({'error': 'Rate limited by Canva API. Please try again later.'}), 503
+        
+        logger.error(f"Banner generation error: {e}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
 
@@ -544,23 +644,42 @@ def generate_copy_variants():
         # Get page data - scrape if not available
         cached_page_data = get_cached_scraping_data(url)
         if not cached_page_data:
-            # Auto-scrape the page
-            import asyncio
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            
-            lp_data = loop.run_until_complete(scrape_landing_page(url))
-            page_meta = loop.run_until_complete(get_page_title_and_description(url))
-            
-            # Cache the scraping results
-            cache_scraping_data(url, lp_data, page_meta)
-            
-            loop.close()
+            # Try to auto-scrape the page
+            try:
+                import asyncio
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                
+                lp_data = loop.run_until_complete(scrape_landing_page(url))
+                page_meta = loop.run_until_complete(get_page_title_and_description(url))
+                
+                # Cache the scraping results
+                cache_scraping_data(url, lp_data, page_meta)
+                
+                loop.close()
+                
+            except Exception as scrape_error:
+                print(f"Web scraping failed: {scrape_error}")
+                # Fallback to mock copy generation
+                try:
+                    from src.mock_copy_gen import generate_mock_copy_variants
+                    copy_variants = generate_mock_copy_variants(url)
+                    
+                    return jsonify({
+                        'success': True,
+                        'variants': copy_variants,
+                        'message': 'Generated copy from URL analysis (web scraping unavailable)',
+                        'source': 'mock'
+                    })
+                    
+                except Exception as mock_error:
+                    print(f"Mock copy generation also failed: {mock_error}")
+                    return jsonify({'error': f'Copy generation failed: web scraping error - {str(scrape_error)}'}), 500
         else:
             lp_data = cached_page_data['lp_data']
             page_meta = cached_page_data['page_meta']
         
-        # Generate 5 copy variants
+        # Generate 5 copy variants from scraped data
         copy_variants = generate_copy_and_visual_prompts(
             text_content=lp_data['text_content'],
             title=page_meta['title'],

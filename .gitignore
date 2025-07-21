@@ -4,3 +4,4 @@ output/
 test_output/
 banner_maker_env/
 .env
+venv/

@@ -287,7 +287,7 @@ class BannerMaker {
 
         const formData = {
             url: url,
-            banner_size: document.getElementById('bannerSize').value,
+            size: document.getElementById('bannerSize').value,
             product_image_path: this.uploadedImagePath,
             ...options
         };
@@ -405,10 +405,13 @@ class BannerMaker {
         // Set banner preview
         document.getElementById('bannerPreview').src = result.banner_url + '?t=' + Date.now();
         
-        // Set download links
-        document.getElementById('downloadBanner').href = `/api/download/${this.currentSessionId}/banner`;
-        document.getElementById('downloadHTML').href = `/api/download/${this.currentSessionId}/html`;
-        document.getElementById('downloadCSS').href = `/api/download/${this.currentSessionId}/css`;
+        // Set Canva view link
+        if (result.export_url) {
+            document.getElementById('viewInCanva').href = result.export_url;
+            document.getElementById('viewInCanva').style.display = 'flex';
+        } else {
+            document.getElementById('viewInCanva').style.display = 'none';
+        }
         
         // Show generation details
         this.showGenerationDetails(result);
@@ -484,7 +487,7 @@ class BannerMaker {
         
         // Clear form
         document.getElementById('url').value = '';
-        document.getElementById('bannerSize').value = '1024x1024';
+        document.getElementById('bannerSize').value = 'MD_RECT';
         
         // Reset URL help text
         const urlHelpText = document.querySelector('#url').parentElement.querySelector('p');
@@ -1580,4 +1583,112 @@ class BannerMaker {
 // Initialize app when DOM is loaded
 document.addEventListener('DOMContentLoaded', () => {
     new BannerMaker();
+    checkCanvaAuthStatus(); // Check Canva authentication status on load
+});
+
+// Canva Authentication Functions
+async function checkCanvaAuthStatus() {
+    try {
+        const response = await fetch('/auth/canva/status');
+        const data = await response.json();
+        
+        updateCanvaAuthUI(data);
+        
+    } catch (error) {
+        console.error('Failed to check Canva auth status:', error);
+        updateCanvaAuthUI({
+            authenticated: false,
+            status: 'error',
+            message: 'Failed to check authentication status'
+        });
+    }
+}
+
+function updateCanvaAuthUI(authData) {
+    const statusIcon = document.getElementById('canva-status-icon');
+    const statusText = document.getElementById('canva-status-text');
+    const connectBtn = document.getElementById('canva-connect-btn');
+    const connectedDiv = document.getElementById('canva-connected');
+    const authNotice = document.getElementById('canva-auth-notice');
+    
+    if (authData.authenticated) {
+        // User is authenticated
+        statusIcon.className = 'fas fa-circle text-green-400 mr-2';
+        statusText.textContent = 'Canva Ready';
+        connectBtn.style.display = 'none';
+        connectedDiv.style.display = 'flex';
+        
+        // Hide the auth notice
+        if (authNotice) {
+            authNotice.style.display = 'none';
+        }
+        
+    } else {
+        // User is not authenticated
+        statusIcon.className = 'fas fa-circle text-red-400 mr-2';
+        statusText.textContent = 'Canva Not Connected';
+        connectBtn.style.display = 'flex';
+        connectedDiv.style.display = 'none';
+        
+        // Show the auth notice
+        if (authNotice) {
+            authNotice.style.display = 'block';
+        }
+    }
+}
+
+function connectToCanva() {
+    // Show loading state
+    const connectBtn = document.getElementById('canva-connect-btn');
+    const originalHTML = connectBtn.innerHTML;
+    connectBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Connecting...';
+    connectBtn.disabled = true;
+    
+    // Redirect to Canva OAuth flow
+    window.location.href = '/auth/canva/authorize';
+}
+
+// Check for successful authentication on page load
+function checkAuthSuccess() {
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get('auth') === 'success') {
+        // Show success message
+        showCanvaAuthSuccess();
+        
+        // Clean up URL
+        const cleanUrl = window.location.protocol + "//" + window.location.host + window.location.pathname;
+        window.history.replaceState({path: cleanUrl}, '', cleanUrl);
+        
+        // Refresh auth status
+        setTimeout(() => {
+            checkCanvaAuthStatus();
+        }, 1000);
+    }
+}
+
+function showCanvaAuthSuccess() {
+    // Create success notification
+    const notification = document.createElement('div');
+    notification.className = 'fixed top-4 right-4 bg-green-500 text-white px-6 py-3 rounded-lg shadow-lg flex items-center z-50';
+    notification.innerHTML = `
+        <i class="fas fa-check-circle mr-3"></i>
+        <span>Successfully connected to Canva!</span>
+        <button onclick="this.parentElement.remove()" class="ml-4 text-white hover:text-gray-200">
+            <i class="fas fa-times"></i>
+        </button>
+    `;
+    
+    document.body.appendChild(notification);
+    
+    // Auto-remove after 5 seconds
+    setTimeout(() => {
+        if (notification.parentElement) {
+            notification.remove();
+        }
+    }, 5000);
+}
+
+// Check for auth success on page load
+document.addEventListener('DOMContentLoaded', () => {
+    checkAuthSuccess();
 });

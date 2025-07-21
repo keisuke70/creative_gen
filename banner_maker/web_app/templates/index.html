@@ -89,19 +89,46 @@
                     </h1>
                     <p class="text-blue-100 mt-2">Create stunning marketing banners with AI</p>
                 </div>
-                <div class="hidden md:block">
-                    <div class="flex items-center space-x-4 text-sm">
-                        <div class="flex items-center">
-                            <i class="fas fa-robot mr-2"></i>
-                            <span>GPT Image 1</span>
+                <div class="flex items-center space-x-4">
+                    <!-- AI Services Info -->
+                    <div class="hidden lg:block">
+                        <div class="flex items-center space-x-3 text-sm">
+                            <div class="flex items-center">
+                                <i class="fas fa-robot mr-2"></i>
+                                <span>GPT Image 1</span>
+                            </div>
+                            <div class="flex items-center">
+                                <i class="fas fa-brain mr-2"></i>
+                                <span>GPT-4.1 mini</span>
+                            </div>
                         </div>
-                        <div class="flex items-center">
-                            <i class="fas fa-eye mr-2"></i>
-                            <span>Google Vision</span>
+                    </div>
+                    
+                    <!-- Canva Authentication Status -->
+                    <div class="flex items-center">
+                        <div id="canva-auth-status" class="flex items-center space-x-3">
+                            <!-- Will be populated by JavaScript -->
+                            <div class="flex items-center text-sm">
+                                <i class="fas fa-circle text-gray-300 mr-2" id="canva-status-icon"></i>
+                                <span id="canva-status-text">Checking Canva...</span>
+                            </div>
                         </div>
-                        <div class="flex items-center">
-                            <i class="fas fa-brain mr-2"></i>
-                            <span>GPT-4.1 mini</span>
+                        
+                        <!-- Connect Button -->
+                        <button id="canva-connect-btn" 
+                                class="ml-4 bg-white bg-opacity-20 hover:bg-opacity-30 px-4 py-2 rounded-lg transition-all duration-200 flex items-center text-sm font-medium"
+                                onclick="connectToCanva()"
+                                style="display: none;">
+                            <i class="fas fa-link mr-2"></i>
+                            Connect to Canva
+                        </button>
+                        
+                        <!-- Connected Status -->
+                        <div id="canva-connected" 
+                             class="ml-4 bg-green-500 bg-opacity-20 px-4 py-2 rounded-lg flex items-center text-sm font-medium"
+                             style="display: none;">
+                            <i class="fas fa-check-circle text-green-300 mr-2"></i>
+                            Canva Connected
                         </div>
                     </div>
                 </div>
@@ -122,6 +149,26 @@
                 <p class="text-lg text-gray-600 max-w-2xl mx-auto">
                     Generate complete marketing banners with text, layout, and styling in a single AI generation. 
                     Upload your product image or let our AI create everything from your landing page content.
+                </p>
+            </div>
+
+            <!-- Canva Authentication Notice -->
+            <div id="canva-auth-notice" class="mb-6 bg-blue-50 border border-blue-200 rounded-lg p-6 text-center" style="display: none;">
+                <div class="flex items-center justify-center mb-4">
+                    <i class="fas fa-palette text-blue-500 text-3xl mr-3"></i>
+                    <h3 class="text-xl font-bold text-blue-800">Connect to Canva</h3>
+                </div>
+                <p class="text-blue-700 mb-4">
+                    To create professional banners directly in your Canva account, please connect your Canva account first.
+                </p>
+                <button onclick="connectToCanva()" 
+                        class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg font-semibold transition-colors duration-200 flex items-center mx-auto">
+                    <i class="fas fa-link mr-2"></i>
+                    Connect to Canva
+                </button>
+                <p class="text-sm text-blue-600 mt-3">
+                    <i class="fas fa-shield-alt mr-2"></i>
+                    Secure OAuth 2.0 authentication - we never store your Canva credentials
                 </p>
             </div>
 
@@ -222,9 +269,13 @@
                                 <i class="fas fa-expand-arrows-alt mr-2"></i>Banner Size
                             </label>
                             <select id="bannerSize" name="bannerSize" class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
-                                <option value="1024x1024">Square (1024×1024)</option>
-                                <option value="1536x1024">Landscape (1536×1024)</option>
-                                <option value="1024x1536">Portrait (1024×1536)</option>
+                                <option value="MD_RECT">Medium Rectangle (300×250)</option>
+                                <option value="LG_RECT">Large Rectangle (336×280)</option>
+                                <option value="LEADERBOARD">Leaderboard (728×90)</option>
+                                <option value="HALF_PAGE">Half Page (300×600)</option>
+                                <option value="WIDE_SKYSCRAPER">Wide Skyscraper (160×600)</option>
+                                <option value="FB_RECT_1">Facebook Rectangle (1200×628)</option>
+                                <option value="FB_SQUARE">Facebook Square (1200×1200)</option>
                             </select>
                         </div>
 
@@ -294,17 +345,27 @@
                                 <img id="bannerPreview" class="max-w-full h-auto rounded-lg mx-auto" alt="Generated Banner">
                             </div>
                             
-                            <!-- Download Buttons -->
-                            <div class="mt-4 flex flex-wrap gap-2">
-                                <a id="downloadBanner" href="#" class="bg-blue-500 text-white px-4 py-2 rounded-lg text-sm hover:bg-blue-600 transition-colors">
-                                    <i class="fas fa-download mr-2"></i>Download PNG
-                                </a>
-                                <a id="downloadHTML" href="#" class="bg-green-500 text-white px-4 py-2 rounded-lg text-sm hover:bg-green-600 transition-colors">
-                                    <i class="fas fa-code mr-2"></i>Download HTML
-                                </a>
-                                <a id="downloadCSS" href="#" class="bg-purple-500 text-white px-4 py-2 rounded-lg text-sm hover:bg-purple-600 transition-colors">
-                                    <i class="fas fa-palette mr-2"></i>Download CSS
-                                </a>
+                            <!-- Canva Access and Current Limitations -->
+                            <div class="mt-4 space-y-3">
+                                <!-- View in Canva Button -->
+                                <div class="flex flex-wrap gap-2">
+                                    <a id="viewInCanva" href="#" target="_blank" class="bg-purple-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-purple-700 transition-colors flex items-center">
+                                        <i class="fas fa-external-link-alt mr-2"></i>View & Edit in Canva
+                                    </a>
+                                </div>
+                                
+                                <!-- Current State Information -->
+                                <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
+                                    <div class="flex items-start">
+                                        <i class="fas fa-info-circle text-yellow-600 mt-0.5 mr-2 flex-shrink-0"></i>
+                                        <div class="text-sm">
+                                            <p class="text-yellow-800 font-medium">Current Implementation Status:</p>
+                                            <p class="text-yellow-700 mt-1">
+                                                The system creates blank designs in your Canva account. You can then manually add your generated copy, uploaded product images, and styling in Canva's editor. Future updates will support automated element placement.
+                                            </p>
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
                         </div>
 

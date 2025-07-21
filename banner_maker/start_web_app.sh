@@ -17,7 +17,7 @@ elif [ -f "../.env" ]; then
 fi
 
 # Check if virtual environment exists
-if [ ! -d "banner_maker_env" ]; then
+if [ ! -d "../venv" ]; then
     echo "❌ Virtual environment not found. Please run setup.sh first."
     exit 1
 fi
@@ -31,7 +31,7 @@ fi
 
 # Activate virtual environment
 echo "✅ Activating virtual environment..."
-source banner_maker_env/bin/activate
+source ../venv/bin/activate
 
 # Start web app
 echo "🚀 Starting web application..."
