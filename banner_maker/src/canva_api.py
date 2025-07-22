@@ -404,7 +404,7 @@ class CanvaAPI:
         
         raise CanvaAPIError(f"Asset upload timeout after {timeout}s")
     
-    def create_design(self, width: int, height: int, template_id: Optional[str] = None) -> str:
+    def create_design(self, width: int, height: int, template_id: Optional[str] = None, title: Optional[str] = None) -> str:
         """
         Create a new blank design with specified dimensions.
         
@@ -412,6 +412,7 @@ class CanvaAPI:
             width: Canvas width in pixels  
             height: Canvas height in pixels
             template_id: Ignored - Connect API doesn't support template duplication
+            title: Optional title for the design
             
         Returns:
             Design ID for editing and export
@@ -449,6 +450,10 @@ class CanvaAPI:
                 }
             }
         
+        # Add title if provided
+        if title:
+            payload["title"] = title
+        
         try:
             response = self._request("POST", "/designs", json=payload)
             design_id = response["design"]["id"]
@@ -467,6 +472,10 @@ class CanvaAPI:
                         "height": height
                     }
                 }
+                
+                # Add title to fallback payload if provided
+                if title:
+                    fallback_payload["title"] = title
                 
                 response = self._request("POST", "/designs", json=fallback_payload)
                 design_id = response["design"]["id"]
@@ -551,8 +560,8 @@ class CanvaAPI:
                 return export_url
             except CanvaAPIError as e:
                 logger.warning(f"Export polling failed: {e}")
-                # Fallback to Canva design URL
-                design_url = f"https://www.canva.com/design/{design_id}/view"
+                # Fallback to Canva design URL (edit mode for user convenience)
+                design_url = f"https://www.canva.com/design/{design_id}/edit"
                 logger.info(f"Returning Canva design URL: {design_url}")
                 return design_url
             

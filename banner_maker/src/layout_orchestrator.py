@@ -49,7 +49,8 @@ def build_banner(
     ad_size: AdSize,
     copy: CopyTriple,
     bg_asset_id: Optional[str] = None,
-    api: Optional[CanvaAPI] = None
+    api: Optional[CanvaAPI] = None,
+    source_url: Optional[str] = None
 ) -> BannerResult:
     """
     Build a complete banner using Canva templates and assets.
@@ -89,8 +90,16 @@ def build_banner(
     
     logger.info(f"Building {ad_size.value} banner ({template.canvas_w}x{template.canvas_h})")
     
+    # Generate meaningful design title from URL
+    design_title = None
+    if source_url:
+        from .title_utils import generate_design_title_from_url, generate_ad_size_display_name
+        ad_size_display = generate_ad_size_display_name(ad_size.value)
+        design_title = generate_design_title_from_url(source_url, ad_size_display)
+        logger.info(f"Generated design title: {design_title}")
+    
     # Step 1: Create design by duplicating template 
-    design_id = api.create_design(template.canvas_w, template.canvas_h, template.template_design_id)
+    design_id = api.create_design(template.canvas_w, template.canvas_h, template.template_design_id, design_title)
     
     # Step 2: Build elements list
     elements = []
@@ -423,7 +432,7 @@ if __name__ == "__main__":
             cta="Buy Now"
         )
         
-        result = build_banner(product, AdSize.MD_RECT, copy)
+        result = build_banner(product, AdSize.MD_RECT, copy, source_url="https://example.com")
         print(f"Test banner created: {result.export_url}")
     else:
         print("Failed to download placeholder image")

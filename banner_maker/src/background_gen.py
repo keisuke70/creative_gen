@@ -2,16 +2,18 @@
 """
 Background generator utility for Canva banners.
 
-Creates deterministic CSS gradients based on product color palettes,
-renders them as images, and uploads to Canva for use as backgrounds.
+Creates AI-generated background images tailored to marketing copy content,
+with gradient fallback when AI generation fails.
 """
 
 import os
 import tempfile
 import logging
-from typing import Optional, List
+import requests
+from typing import Optional, List, Dict, Any
 from PIL import Image, ImageDraw
 from dotenv import load_dotenv
+import openai
 
 from .canva_api import CanvaAPI, CanvaAPIError
 
@@ -22,43 +24,214 @@ load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '..', '..', '.en
 logger = logging.getLogger(__name__)
 
 
-def maybe_generate_background(product, api: Optional[CanvaAPI] = None) -> Optional[str]:
+def maybe_generate_background(product, copy_content: Optional[Dict[str, Any]] = None, api: Optional[CanvaAPI] = None) -> Optional[str]:
     """
-    Generate a gradient background asset from product palette.
+    Generate an AI background image tailored to the marketing copy, with gradient fallback.
     
     Args:
         product: Product object with palette attribute
+        copy_content: Dictionary with headline, subline, and cta text for AI prompt generation
+        api: Authenticated Canva API instance
         
     Returns:
-        Canva asset ID if successful, None if no palette or failure
+        Canva asset ID if successful, None if failure
     """
-    if not hasattr(product, 'palette') or not product.palette:
-        logger.info("No color palette available, skipping background generation")
-        return None
+    # Get authenticated API
+    if api is None:
+        from .canva_oauth import get_authenticated_api
+        api = get_authenticated_api()
+        if not api:
+            logger.warning("No authenticated Canva API available for background generation")
+            return None
     
     try:
-        # Generate gradient image
-        gradient_data = create_gradient_image(product.palette)
+        # Try AI background generation first if copy content is available
+        if copy_content and copy_content.get('headline'):
+            logger.info("Attempting AI background generation based on copy content")
+            ai_background_data = generate_ai_background(copy_content, product)
+            
+            if ai_background_data:
+                asset_id = api.upload_binary(
+                    ai_background_data,
+                    "ai_background.png",
+                    "image/png"
+                )
+                logger.info(f"Generated AI background: {asset_id}")
+                return asset_id
+            else:
+                logger.warning("AI background generation failed, falling back to gradient")
         
-        # Upload to Canva using provided or authenticated API
-        if api is None:
-            from .canva_oauth import get_authenticated_api
-            api = get_authenticated_api()
-            if not api:
-                logger.warning("No authenticated Canva API available for background generation")
-                return None
-        
-        asset_id = api.upload_binary(
-            gradient_data,
-            "gradient_background.png",
-            "image/png"
-        )
-        
-        logger.info(f"Generated gradient background: {asset_id}")
-        return asset_id
+        # Fallback to gradient if no copy content or AI generation failed
+        if hasattr(product, 'palette') and product.palette:
+            logger.info("Generating gradient background as fallback")
+            gradient_data = create_gradient_image(product.palette)
+            
+            asset_id = api.upload_binary(
+                gradient_data,
+                "gradient_background.png",
+                "image/png"
+            )
+            
+            logger.info(f"Generated gradient background: {asset_id}")
+            return asset_id
+        else:
+            logger.info("No color palette available, skipping background generation")
+            return None
         
     except Exception as e:
         logger.warning(f"Background generation failed: {e}")
+        return None
+
+
+def generate_ai_background_with_stored_prompt(copy_content: Dict[str, Any], product) -> Optional[bytes]:
+    """
+    Generate AI background image using the pre-generated prompt from copy generation.
+    
+    Args:
+        copy_content: Dictionary containing headline, background_prompt, and other copy data
+        product: Product object for additional context (mainly for fallback)
+        
+    Returns:
+        PNG image data as bytes, or None if generation fails
+    """
+    try:
+        # Set up OpenAI client
+        openai_api_key = os.getenv("OPENAI_API_KEY")
+        if not openai_api_key:
+            logger.warning("No OpenAI API key found for AI background generation")
+            return None
+        
+        # Extract the pre-generated background prompt
+        background_prompt = copy_content.get('background_prompt', '')
+        copy_type = copy_content.get('type', 'neutral')
+        headline = copy_content.get('headline', copy_content.get('text', ''))
+        
+        if not background_prompt:
+            logger.warning("No background prompt found in copy content, falling back to basic generation")
+            return generate_ai_background(copy_content, product)
+        
+        # Enhance the stored prompt with technical requirements for DALL-E
+        enhanced_prompt = f"""
+        {background_prompt}
+        
+        TECHNICAL REQUIREMENTS:
+        - Composition optimized for text overlay readability
+        - Professional marketing material aesthetic
+        - 1024x1024 resolution optimized
+        - No text, logos, or specific branded elements
+        - Colors and mood should complement the message: "{headline[:50]}"
+        - Suitable for {copy_type} marketing approach
+        """.strip()
+        
+        logger.info(f"Generating AI background using stored prompt for {copy_type} copy")
+        
+        # Generate image with OpenAI DALL-E
+        client = openai.OpenAI(api_key=openai_api_key)
+        
+        response = client.images.generate(
+            model="dall-e-3",
+            prompt=enhanced_prompt,
+            size="1024x1024",
+            quality="standard",
+            n=1
+        )
+        
+        # Download the generated image
+        image_url = response.data[0].url
+        image_response = requests.get(image_url, timeout=30)
+        
+        if image_response.status_code == 200:
+            logger.info(f"Successfully generated AI background using stored prompt")
+            return image_response.content
+        else:
+            logger.error(f"Failed to download AI generated image: {image_response.status_code}")
+            return None
+            
+    except Exception as e:
+        logger.warning(f"AI background generation with stored prompt failed: {e}")
+
+def generate_ai_background(copy_content: Dict[str, Any], product) -> Optional[bytes]:
+    """
+    Generate AI background image using OpenAI DALL-E based on marketing copy content.
+    
+    Args:
+        copy_content: Dictionary containing headline, subline, cta
+        product: Product object for additional context
+        
+    Returns:
+        PNG image data as bytes, or None if generation fails
+    """
+    try:
+        # Set up OpenAI client
+        openai_api_key = os.getenv("OPENAI_API_KEY")
+        if not openai_api_key:
+            logger.warning("No OpenAI API key found for AI background generation")
+            return None
+        
+        # Create contextual prompt for background generation
+        headline = copy_content.get('headline', '')
+        subline = copy_content.get('subline', '')
+        cta = copy_content.get('cta', '')
+        
+        # Build a descriptive prompt for the background
+        prompt_parts = []
+        
+        # Analyze copy to determine style and mood
+        copy_text = f"{headline} {subline} {cta}".lower()
+        
+        # Determine background style based on copy content
+        if any(word in copy_text for word in ['luxury', 'premium', 'elegant', 'sophisticated']):
+            style = "luxury, elegant, sophisticated with gold accents and premium textures"
+        elif any(word in copy_text for word in ['tech', 'digital', 'ai', 'innovation', 'modern']):
+            style = "modern, tech-inspired with clean geometric patterns and digital aesthetics"
+        elif any(word in copy_text for word in ['nature', 'organic', 'natural', 'eco', 'green']):
+            style = "natural, organic with soft textures and earth tones"
+        elif any(word in copy_text for word in ['energy', 'power', 'strong', 'dynamic', 'bold']):
+            style = "dynamic, energetic with bold patterns and vibrant colors"
+        elif any(word in copy_text for word in ['comfort', 'cozy', 'home', 'family', 'warm']):
+            style = "warm, comfortable with soft textures and inviting tones"
+        else:
+            style = "clean, professional with subtle patterns and balanced composition"
+        
+        # Create the AI prompt
+        background_prompt = f"""
+        Create an abstract background image suitable for a marketing banner with the following characteristics:
+        - Style: {style}
+        - Mood: Professional yet engaging, suitable for the marketing message "{headline}"
+        - Composition: Abstract patterns, textures, or geometric shapes that won't compete with text overlay
+        - Color harmony: Balanced and sophisticated color palette
+        - Focus: Background should be subtle enough to allow text to be readable when overlaid
+        - No text, logos, or specific objects - purely abstract background patterns
+        - High quality, professional marketing material aesthetic
+        - Suitable for banner advertising format
+        """.strip()
+        
+        logger.info(f"Generating AI background with prompt: {background_prompt[:100]}...")
+        
+        # Generate image with OpenAI DALL-E
+        client = openai.OpenAI(api_key=openai_api_key)
+        
+        response = client.images.generate(
+            model="dall-e-3",
+            prompt=background_prompt,
+            size="1024x1024",  # Standard size, will be resized as needed
+            quality="standard",
+            n=1
+        )
+        
+        # Download the generated image
+        image_url = response.data[0].url
+        image_response = requests.get(image_url, timeout=30)
+        
+        if image_response.status_code == 200:
+            logger.info("Successfully generated AI background image")
+            return image_response.content
+        else:
+            logger.error(f"Failed to download AI generated image: {image_response.status_code}")
+            return None
+            
+    except Exception as e:
+        logger.warning(f"AI background generation failed: {e}")
         return None
 
 

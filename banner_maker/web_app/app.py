@@ -238,11 +238,13 @@ def generate_banner():
             palette=['#FF6B35', '#004225']  # Default palette
         )
         
-        # Generate background if needed
-        bg_asset_id = maybe_generate_background(product, api)
+        # Use pre-generated background if provided
+        bg_asset_id = data.get('background_asset_id')
+        if not bg_asset_id:
+            logger.warning("No background asset ID provided, proceeding without background")
         
         # Build banner with authenticated API
-        result = build_banner(product, ad_size, copy, bg_asset_id, api)
+        result = build_banner(product, ad_size, copy, bg_asset_id, api, url)
         
         # Import template map for dimensions
         from src.templates import TEMPLATE_MAP
@@ -726,6 +728,73 @@ def save_selected_copy():
         
     except Exception as e:
         logger.error(f"Save copy error: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/generate-background', methods=['POST'])
+@require_canva_auth
+def generate_background():
+    """Generate AI background image using stored prompt from copy generation"""
+    try:
+        from src.background_gen import generate_ai_background_with_stored_prompt
+        
+        data = request.get_json()
+        url = data.get('url')
+        selected_copy = data.get('selected_copy')
+        
+        if not url or not selected_copy:
+            return jsonify({'error': 'URL and selected copy are required'}), 400
+        
+        # Get authenticated Canva API instance
+        api = get_authenticated_api()
+        if not api:
+            return jsonify({'error': 'Canva authentication required'}), 401
+        
+        # Create copy content dictionary with the stored background prompt
+        copy_content = {
+            'headline': selected_copy.get('text', '').split('\n')[0][:50],
+            'text': selected_copy.get('text', ''),
+            'type': selected_copy.get('type', 'neutral'),
+            'tone': selected_copy.get('tone', 'professional'),
+            'background_prompt': selected_copy.get('background_prompt', '')  # This is the key enhancement
+        }
+        
+        # Create simple product for fallback gradient generation
+        from src.layout_orchestrator import Product
+        product = Product(
+            hero_asset_id=None,
+            palette=['#2C3E50', '#3498DB']  # Default professional colors
+        )
+        
+        # Generate AI background using the stored prompt
+        logger.info("Generating AI background using LLM-generated prompt from copy generation")
+        ai_background_data = generate_ai_background_with_stored_prompt(copy_content, product)
+        
+        if ai_background_data:
+            # Upload to Canva
+            asset_id = api.upload_binary(
+                ai_background_data,
+                "ai_background.png",
+                "image/png"
+            )
+            
+            logger.info(f"Generated AI background asset: {asset_id}")
+            
+            # For the preview URL, we'll use a placeholder since Canva doesn't provide direct asset URLs
+            # In a real implementation, you might save the image locally for preview
+            background_url = "data:image/png;base64," + __import__('base64').b64encode(ai_background_data).decode()
+            
+            return jsonify({
+                'success': True,
+                'background_asset_id': asset_id,
+                'background_url': background_url,
+                'message': 'AI background generated successfully'
+            })
+        else:
+            return jsonify({'error': 'Failed to generate AI background'}), 500
+        
+    except Exception as e:
+        logger.error(f"Background generation error: {e}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
 

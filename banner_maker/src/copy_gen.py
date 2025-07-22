@@ -35,55 +35,73 @@ def generate_copy_and_visual_prompts(
         system_prompt = """君は最良のコピーライターだ. ユーザーのクリックを引き出す、正確で・競争力のある広告バナー向けコピーを作って欲しい。広告バナー画像に適切にオーバーレイできる2文以下の短いセンテンスを生成すること。"""
         #system_prompt = """You are an expert marketing copywriter. Generate concise, compelling banner copy that drives action. Each variant should be 1-2 short sentences max, suitable for banner overlays."""
         
-        # Define copy variants with specific instructions and visual themes
+        # Define copy variants with enhanced background prompt generation
         copy_variants = [
             {
                 "type": "benefit",
                 "instruction": "Focus on the main benefit or value proposition. What problem does this solve?",
                 "tone": "clear and benefit-focused",
-                "visual_theme": "clean, modern, professional environment emphasizing quality and reliability"
+                "bg_instruction": "Create a background that visually reinforces trust, quality, and value delivery"
             },
             {
                 "type": "urgency", 
                 "instruction": "Create urgency and immediate action. Use time-sensitive language.",
                 "tone": "urgent and action-driving",
-                "visual_theme": "dynamic, energetic background with motion elements and vibrant colors"
+                "bg_instruction": "Create a background with dynamic energy that motivates immediate action"
             },
             {
                 "type": "promo",
                 "instruction": "Highlight deals, offers, or promotional aspects. Make it sales-focused.",
                 "tone": "promotional and enticing",
-                "visual_theme": "celebratory, eye-catching background with warm lighting and promotional feel"
+                "bg_instruction": "Create a background that feels celebratory and highlights special offers"
             },
             {
                 "type": "neutral",
                 "instruction": "Create straightforward, factual copy without hype. Focus on clear information.",
                 "tone": "professional and informative",
-                "visual_theme": "minimal, clean background with subtle gradients and professional aesthetic"
+                "bg_instruction": "Create a clean, professional background that supports clear communication"
             },
             {
                 "type": "playful",
                 "instruction": "Use friendly, approachable language that feels personal and engaging.",
                 "tone": "friendly and conversational",
-                "visual_theme": "bright, cheerful background with soft colors and welcoming atmosphere"
+                "bg_instruction": "Create a warm, approachable background that feels welcoming and friendly"
             }
         ]
         
         results = []
         
         for variant in copy_variants:
-            # Generate copy and visual prompt in one call (concise prompt for speed)
-            user_prompt = f"""Content: {context}
+            # Enhanced prompt for both copy and contextual background generation
+            user_prompt = f"""Analyze this business content and create marketing copy + a detailed background image prompt:
 
-Create {variant['type']} marketing copy + background prompt:
+BUSINESS CONTENT:
+- Title: {title}
+- Description: {description}
+- Page Content: {text_content[:800]}
+- Brand Context: {brand_context}
 
-Copy: {variant['instruction']} | Tone: {variant['tone']} | Max 2 sentences | Banner overlay text
+TASK:
+1. Create {variant['type']} marketing copy following: {variant['instruction']}
+2. Analyze the business context to create a sophisticated background prompt
 
-Background: {variant['visual_theme']} atmosphere
+COPY REQUIREMENTS:
+- Tone: {variant['tone']}
+- Length: 1-2 sentences maximum
+- Banner-ready text for overlay
 
-Format:
-COPY: [copy here]
-BACKGROUND: [background here]"""
+BACKGROUND PROMPT REQUIREMENTS:
+- Analyze the business industry, target audience, and brand personality from the content
+- {variant['bg_instruction']}
+- Consider the business type (B2B vs B2C, service vs product, industry vertical)
+- Create abstract background elements that subtly reflect the business context
+- Ensure text overlay readability
+- NO logos, text, or literal objects - only abstract atmospheric elements
+- Professional marketing material quality
+
+OUTPUT FORMAT:
+COPY: [your marketing copy here]
+BACKGROUND: Create an abstract background for marketing banner: [detailed background prompt based on business analysis]"""
             
             # Try GPT-4.1-mini first, then fallback to other models (May 2025 models)
             models_to_try = ["gpt-4.1-mini", "gpt-4.1", "gpt-4.1-nano", "gpt-4o-mini"]
@@ -107,7 +125,7 @@ BACKGROUND: [background here]"""
             if response is None:
                 print(f"All models failed for {variant['type']}, using fallback copy")
                 copy_text = f"Discover {variant['type']} solutions today!"
-                background_prompt = variant['visual_theme']
+                background_prompt = f"Professional {variant['type']} background suitable for business marketing"
             else:
                 response_text = response.choices[0].message.content.strip()
                 
@@ -126,7 +144,7 @@ BACKGROUND: [background here]"""
                 if not copy_text:
                     copy_text = response_text.split('\n')[0][:100]
                 if not background_prompt:
-                    background_prompt = variant['visual_theme']
+                    background_prompt = f"Professional abstract background for {variant['type']} marketing message"
             
             results.append({
                 "type": variant["type"],
@@ -134,7 +152,6 @@ BACKGROUND: [background here]"""
                 "tone": variant["tone"],
                 "char_count": len(copy_text),
                 "background_prompt": background_prompt,
-                "visual_theme": variant["visual_theme"]
             })
         
         return results

@@ -9,8 +9,23 @@ class BannerMaker {
         this.currentTempImage = null; // Track temp images for cleanup
         this.selectedCopy = null; // Track selected copy
         this.copyVariants = []; // Store generated copy variants
+        this.generatedBackgroundId = null; // Track generated background asset ID
         
         this.initializeEventListeners();
+    }
+
+    // Helper function to safely manipulate element classes
+    safeToggleClass(elementId, className, add = true) {
+        const element = document.getElementById(elementId);
+        if (element) {
+            if (add) {
+                element.classList.add(className);
+            } else {
+                element.classList.remove(className);
+            }
+        } else {
+            console.warn(`Element with id '${elementId}' not found`);
+        }
     }
 
     initializeEventListeners() {
@@ -26,21 +41,6 @@ class BannerMaker {
         // File upload
         this.initializeFileUpload();
 
-        // Regenerate with same copy button - fastest option
-        const regenerateWithCopyBtn = document.getElementById('regenerateWithCopyBtn');
-        if (regenerateWithCopyBtn) {
-            regenerateWithCopyBtn.addEventListener('click', () => {
-                this.regenerateWithSameCopy();
-            });
-        }
-
-        // Regenerate button - keep current URL and settings
-        const regenerateBtn = document.getElementById('regenerateBtn');
-        if (regenerateBtn) {
-            regenerateBtn.addEventListener('click', () => {
-                this.regenerateBanner();
-            });
-        }
 
         // Create another button - reset everything
         const createAnotherBtn = document.getElementById('createAnotherBtn');
@@ -103,6 +103,22 @@ class BannerMaker {
         if (regenerateCopyBtn) {
             regenerateCopyBtn.addEventListener('click', () => {
                 this.generateCopy();
+            });
+        }
+
+        // Generate background button
+        const generateBackgroundBtn = document.getElementById('generateBackgroundBtn');
+        if (generateBackgroundBtn) {
+            generateBackgroundBtn.addEventListener('click', () => {
+                this.generateBackground();
+            });
+        }
+
+        // Regenerate background button
+        const regenerateBackgroundBtn = document.getElementById('regenerateBackgroundBtn');
+        if (regenerateBackgroundBtn) {
+            regenerateBackgroundBtn.addEventListener('click', () => {
+                this.generateBackground();
             });
         }
 
@@ -282,6 +298,12 @@ class BannerMaker {
             return;
         }
 
+        // Check if background has been generated
+        if (!this.generatedBackgroundId) {
+            this.showError('Please generate AI background first');
+            return;
+        }
+
         // Store current URL for regeneration
         this.currentUrl = url;
 
@@ -289,6 +311,7 @@ class BannerMaker {
             url: url,
             size: document.getElementById('bannerSize').value,
             product_image_path: this.uploadedImagePath,
+            background_asset_id: this.generatedBackgroundId,
             ...options
         };
 
@@ -322,8 +345,8 @@ class BannerMaker {
     }
 
     showProgressSection() {
-        document.getElementById('progressSection').classList.remove('hidden');
-        document.getElementById('resultsSection').classList.add('hidden');
+        this.safeToggleClass('progressSection', 'hidden', false);
+        this.safeToggleClass('resultsSection', 'hidden', true);
         
         // Disable form
         document.getElementById('generateBtn').disabled = true;
@@ -334,11 +357,14 @@ class BannerMaker {
     }
 
     hideProgressSection() {
-        document.getElementById('progressSection').classList.add('hidden');
+        this.safeToggleClass('progressSection', 'hidden', true);
         
         // Re-enable form
-        document.getElementById('generateBtn').disabled = false;
-        document.getElementById('generateBtn').innerHTML = '<i class="fas fa-magic mr-2"></i>Generate AI Banner';
+        const generateBtn = document.getElementById('generateBtn');
+        if (generateBtn) {
+            generateBtn.disabled = false;
+            generateBtn.innerHTML = '<i class="fas fa-magic mr-2"></i>Generate AI Banner';
+        }
     }
 
     startPolling() {
@@ -400,94 +426,36 @@ class BannerMaker {
         this.hideProgressSection();
         
         // Show results section
-        document.getElementById('resultsSection').classList.remove('hidden');
-        
-        // Set banner preview
-        document.getElementById('bannerPreview').src = result.banner_url + '?t=' + Date.now();
+        this.safeToggleClass('resultsSection', 'hidden', false);
         
         // Set Canva view link
-        if (result.export_url) {
-            document.getElementById('viewInCanva').href = result.export_url;
-            document.getElementById('viewInCanva').style.display = 'flex';
-        } else {
-            document.getElementById('viewInCanva').style.display = 'none';
+        const viewInCanva = document.getElementById('viewInCanva');
+        if (result.export_url && viewInCanva) {
+            viewInCanva.href = result.export_url;
+            viewInCanva.style.display = 'flex';
+        } else if (viewInCanva) {
+            viewInCanva.style.display = 'none';
         }
-        
-        // Show generation details
-        this.showGenerationDetails(result);
         
         // Scroll to results
-        document.getElementById('resultsSection').scrollIntoView({ behavior: 'smooth' });
-    }
-
-    showGenerationDetails(result) {
-        const detailsContainer = document.getElementById('generationDetails');
-        
-        const details = [
-            { label: 'Image Source', value: result.image_source, icon: 'fas fa-image' },
-            { label: 'Copy Type', value: result.copy_used?.type || 'auto', icon: 'fas fa-pen' },
-            { label: 'Dimensions', value: result.dimensions, icon: 'fas fa-expand' },
-            { label: 'Copy Used', value: result.copy_used?.text || 'N/A', icon: 'fas fa-quote-left' }
-        ];
-
-        detailsContainer.innerHTML = details.map(detail => `
-            <div class="flex items-start">
-                <i class="${detail.icon} text-gray-400 mr-3 mt-1"></i>
-                <div>
-                    <span class="font-medium text-gray-700">${detail.label}:</span>
-                    <span class="text-gray-600 ml-2">${detail.value}</span>
-                </div>
-            </div>
-        `).join('');
-    }
-
-    async regenerateWithSameCopy() {
-        if (!this.currentUrl) {
-            this.showError('No URL to regenerate with');
-            return;
+        const resultsSection = document.getElementById('resultsSection');
+        if (resultsSection) {
+            resultsSection.scrollIntoView({ behavior: 'smooth' });
         }
-
-        // Check if copy cache exists for this URL
-        try {
-            const response = await fetch(`/api/cache/${encodeURIComponent(this.currentUrl)}`);
-            const data = await response.json();
-            
-            if (!data.has_copy_cache) {
-                this.showError('No cached copy data available. Use "Regenerate with Same URL" instead.');
-                return;
-            }
-        } catch (error) {
-            this.showError('Could not check copy cache status');
-            return;
-        }
-
-        // Use the stored URL and current form settings with copy skip
-        document.getElementById('url').value = this.currentUrl;
-        
-        // Trigger generation with copy skip enabled
-        await this.generateBannerWithOptions({ skip_copy: true });
     }
 
-    async regenerateBanner() {
-        if (!this.currentUrl) {
-            this.showError('No URL to regenerate with');
-            return;
-        }
 
-        // Use the stored URL and current form settings
-        document.getElementById('url').value = this.currentUrl;
-        
-        // Trigger generation with current settings
-        await this.generateBanner();
-    }
 
     resetForm() {
         // Hide results
-        document.getElementById('resultsSection').classList.add('hidden');
+        this.safeToggleClass('resultsSection', 'hidden', true);
         
         // Clear form
-        document.getElementById('url').value = '';
-        document.getElementById('bannerSize').value = 'MD_RECT';
+        const urlInput = document.getElementById('url');
+        const bannerSizeSelect = document.getElementById('bannerSize');
+        
+        if (urlInput) urlInput.value = '';
+        if (bannerSizeSelect) bannerSizeSelect.value = 'MD_RECT';
         
         // Reset URL help text
         const urlHelpText = document.querySelector('#url').parentElement.querySelector('p');
@@ -502,7 +470,9 @@ class BannerMaker {
         // Reset copy state
         this.selectedCopy = null;
         this.copyVariants = [];
-        document.getElementById('generatedCopySection').classList.add('hidden');
+        this.generatedBackgroundId = null;
+        this.safeToggleClass('generatedCopySection', 'hidden', true);
+        this.safeToggleClass('backgroundSection', 'hidden', true);
         
         // Reset copy status display
         const statusDisplay = document.getElementById('copyStatusDisplay');
@@ -514,6 +484,24 @@ class BannerMaker {
         `;
         statusDisplay.className = 'w-full px-4 py-3 border border-gray-300 rounded-lg bg-gray-50';
         
+        // Reset background status display
+        const backgroundStatusDisplay = document.getElementById('backgroundStatusDisplay');
+        if (backgroundStatusDisplay) {
+            backgroundStatusDisplay.innerHTML = `
+                <span class="text-gray-500">
+                    <i class="fas fa-exclamation-triangle mr-2 text-orange-500"></i>
+                    Please select copy first to generate background
+                </span>
+            `;
+            backgroundStatusDisplay.className = 'w-full px-4 py-3 border border-gray-300 rounded-lg bg-gray-50';
+        }
+        
+        // Hide background preview
+        const backgroundPreview = document.getElementById('backgroundPreview');
+        if (backgroundPreview) {
+            backgroundPreview.classList.add('hidden');
+        }
+        
         // Disable banner generation again
         const generateBtn = document.getElementById('generateBtn');
         const helpText = generateBtn.parentElement.querySelector('p');
@@ -521,7 +509,7 @@ class BannerMaker {
         generateBtn.className = 'bg-gradient-to-r from-gray-400 to-gray-500 text-white px-8 py-4 rounded-lg font-semibold text-lg shadow-lg disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200';
         
         if (helpText) {
-            helpText.textContent = 'Please generate and select copy to enable banner generation';
+            helpText.textContent = 'Generate copy and background first to enable Canva upload';
             helpText.className = 'text-sm text-gray-500 mt-2';
         }
         
@@ -692,6 +680,11 @@ class BannerMaker {
 
     displayCopyVariants(variants) {
         const container = document.getElementById('copyVariantsContainer');
+        if (!container) {
+            console.warn('copyVariantsContainer element not found');
+            return;
+        }
+        
         container.innerHTML = '';
 
         variants.forEach((variant, index) => {
@@ -1445,9 +1438,163 @@ class BannerMaker {
         }
     }
 
+    async generateBackground() {
+        const url = document.getElementById('url').value.trim();
+        const generateBtn = document.getElementById('generateBackgroundBtn');
+        
+        if (!url) {
+            this.showError('Please enter a URL first');
+            return;
+        }
+
+        if (!this.selectedCopy) {
+            this.showError('Please select copy first');
+            return;
+        }
+
+        try {
+            // Show loading state
+            if (generateBtn) {
+                generateBtn.disabled = true;
+                generateBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Generating...';
+            }
+            
+            // Update status
+            const statusDisplay = document.getElementById('backgroundStatusDisplay');
+            if (statusDisplay) {
+                statusDisplay.innerHTML = `
+                    <span class="text-blue-600">
+                        <i class="fas fa-spinner fa-spin mr-2"></i>
+                        Generating AI background based on your copy...
+                    </span>
+                `;
+                statusDisplay.className = 'w-full px-4 py-3 border border-blue-300 rounded-lg bg-blue-50';
+            }
+            
+            // Generate background
+            const response = await fetch('/api/generate-background', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ 
+                    url: url,
+                    selected_copy: this.selectedCopy
+                })
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                this.generatedBackgroundId = result.background_asset_id;
+                this.showBackgroundPreview(result.background_url);
+                this.updateBackgroundStatus(true);
+                this.showSuccessMessage('AI background generated successfully!');
+                this.checkIfReadyForBannerGeneration();
+            } else {
+                throw new Error(result.error || 'Failed to generate background');
+            }
+
+        } catch (error) {
+            console.error('Error generating background:', error);
+            this.showError('Failed to generate background: ' + error.message);
+            this.updateBackgroundStatus(false);
+        } finally {
+            // Reset button state
+            if (generateBtn) {
+                generateBtn.disabled = false;
+                generateBtn.innerHTML = '<i class="fas fa-paint-brush mr-2"></i>Generate AI Background';
+            }
+        }
+    }
+
+    showBackgroundPreview(backgroundUrl) {
+        const preview = document.getElementById('backgroundPreview');
+        if (!preview) {
+            console.warn('backgroundPreview element not found');
+            return;
+        }
+        
+        const previewImage = preview.querySelector('img');
+        if (!previewImage) {
+            console.warn('backgroundPreview img element not found');
+            return;
+        }
+        
+        previewImage.src = backgroundUrl;
+        preview.classList.remove('hidden');
+    }
+
+    updateBackgroundStatus(success, message = null) {
+        const statusDisplay = document.getElementById('backgroundStatusDisplay');
+        if (!statusDisplay) {
+            console.warn('backgroundStatusDisplay element not found');
+            return;
+        }
+        
+        if (success) {
+            statusDisplay.innerHTML = `
+                <span class="text-green-600">
+                    <i class="fas fa-check-circle mr-2"></i>
+                    AI background generated successfully
+                </span>
+            `;
+            statusDisplay.className = 'w-full px-4 py-3 border border-green-300 rounded-lg bg-green-50';
+        } else {
+            statusDisplay.innerHTML = `
+                <span class="text-red-600">
+                    <i class="fas fa-exclamation-triangle mr-2"></i>
+                    ${message || 'Background generation failed'}
+                </span>
+            `;
+            statusDisplay.className = 'w-full px-4 py-3 border border-red-300 rounded-lg bg-red-50';
+        }
+    }
+
+    checkIfReadyForBannerGeneration() {
+        // Check if we have both copy and background ready
+        if (this.selectedCopy && this.generatedBackgroundId) {
+            this.enableBannerGeneration();
+        }
+    }
+
+    showBackgroundSection() {
+        const backgroundSection = document.getElementById('backgroundSection');
+        if (backgroundSection) {
+            backgroundSection.classList.remove('hidden');
+        } else {
+            console.warn('backgroundSection element not found');
+        }
+    }
+
+    enableBackgroundGeneration() {
+        const generateBtn = document.getElementById('generateBackgroundBtn');
+        const statusDisplay = document.getElementById('backgroundStatusDisplay');
+        
+        if (generateBtn) {
+            generateBtn.disabled = false;
+            generateBtn.className = 'bg-gradient-to-r from-green-500 to-blue-600 text-white px-6 py-3 rounded-lg font-semibold shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-200';
+        }
+        
+        if (statusDisplay) {
+            statusDisplay.innerHTML = `
+                <span class="text-blue-600">
+                    <i class="fas fa-info-circle mr-2"></i>
+                    Ready to generate AI background based on your selected copy
+                </span>
+            `;
+            statusDisplay.className = 'w-full px-4 py-3 border border-blue-300 rounded-lg bg-blue-50';
+        }
+    }
+
     displayCopyVariants(variants) {
         const section = document.getElementById('generatedCopySection');
         const container = document.getElementById('copyVariantsContainer');
+        
+        if (!container) {
+            console.warn('copyVariantsContainer element not found');
+            return;
+        }
         
         // Clear previous variants
         container.innerHTML = '';
@@ -1483,6 +1630,8 @@ class BannerMaker {
         // Add event listeners for select buttons and text changes
         container.querySelectorAll('.select-copy-btn').forEach(btn => {
             btn.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
                 const index = parseInt(e.target.dataset.index);
                 this.selectCopy(index);
             });
@@ -1521,6 +1670,9 @@ class BannerMaker {
         const url = document.getElementById('url').value.trim();
 
         try {
+            // Set selectedCopy immediately to prevent race conditions
+            this.selectedCopy = selectedCopy;
+            
             // Save selected copy to backend
             const response = await fetch('/api/save-selected-copy', {
                 method: 'POST',
@@ -1535,16 +1687,19 @@ class BannerMaker {
 
             const result = await response.json();
             if (result.success) {
-                this.selectedCopy = selectedCopy;
                 this.updateCopyStatus(selectedCopy);
-                this.enableBannerGeneration();
+                this.showBackgroundSection();
+                this.enableBackgroundGeneration();
                 this.showSuccessMessage('Copy selected successfully!');
             } else {
+                // Reset on failure
+                this.selectedCopy = null;
                 throw new Error(result.error || 'Failed to save copy selection');
             }
 
         } catch (error) {
             console.error('Error selecting copy:', error);
+            this.selectedCopy = null;
             this.showError('Failed to select copy: ' + error.message);
         }
     }
@@ -1553,13 +1708,15 @@ class BannerMaker {
         const statusDisplay = document.getElementById('copyStatusDisplay');
         const indicator = document.getElementById('selectedCopyIndicator');
         
-        statusDisplay.innerHTML = `
-            <span class="text-green-600">
-                <i class="fas fa-check-circle mr-2"></i>
-                Selected: "${selectedCopy.text.substring(0, 50)}${selectedCopy.text.length > 50 ? '...' : ''}"
-            </span>
-        `;
-        statusDisplay.className = 'w-full px-4 py-3 border border-green-300 rounded-lg bg-green-50';
+        if (statusDisplay) {
+            statusDisplay.innerHTML = `
+                <span class="text-green-600">
+                    <i class="fas fa-check-circle mr-2"></i>
+                    Selected: "${selectedCopy.text.substring(0, 50)}${selectedCopy.text.length > 50 ? '...' : ''}"
+                </span>
+            `;
+            statusDisplay.className = 'w-full px-4 py-3 border border-green-300 rounded-lg bg-green-50';
+        }
         
         if (indicator) {
             indicator.classList.remove('hidden');
@@ -1574,7 +1731,7 @@ class BannerMaker {
         generateBtn.className = 'bg-gradient-to-r from-blue-500 to-purple-600 text-white px-8 py-4 rounded-lg font-semibold text-lg shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-200';
         
         if (helpText) {
-            helpText.textContent = 'Ready to generate your AI banner!';
+            helpText.textContent = 'Send your copy and background to Canva!';
             helpText.className = 'text-sm text-green-600 mt-2';
         }
     }
