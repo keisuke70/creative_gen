@@ -42,7 +42,7 @@ def extract_product_info_from_url(url: str) -> Dict[str, str]:
     return {
         'domain': domain,
         'product_keywords': product_keywords,
-        'title': ' '.join(product_keywords[:3]).title() if product_keywords else 'Quality Product',
+        'title': ' '.join(product_keywords[:3]).title() if product_keywords else '高品質商品',
         'category': 'product'
     }
 
@@ -61,12 +61,12 @@ def generate_mock_copy_variants(url: str) -> List[Dict[str, str]]:
     
     # Create context for AI copy generation
     context = f"""
-    Product URL: {url}
-    Domain: {product_info['domain']}
-    Product: {product_info['title']}
-    Keywords: {', '.join(product_info['product_keywords'])}
+    商品URL: {url}
+    ドメイン: {product_info['domain']}
+    商品: {product_info['title']}
+    キーワード: {', '.join(product_info['product_keywords'])}
     
-    Generate marketing copy for this product based on the URL and keywords.
+    このURLとキーワードに基づいて、この商品のマーケティングコピーを日本語で生成してください。
     """
     
     try:
@@ -74,7 +74,7 @@ def generate_mock_copy_variants(url: str) -> List[Dict[str, str]]:
         copy_variants = generate_copy_and_visual_prompts(
             text_content=context,
             title=product_info['title'],
-            description=f"Product from {product_info['domain']}"
+            description=f"{product_info['domain']}の商品"
         )
         
         # Format variants properly
@@ -100,34 +100,34 @@ def generate_mock_copy_variants(url: str) -> List[Dict[str, str]]:
 def generate_fallback_copy(product_info: Dict[str, str]) -> List[Dict[str, str]]:
     """Generate fallback copy when AI generation fails."""
     
-    product_name = product_info.get('title', 'Premium Product')
-    domain = product_info.get('domain', 'store')
+    product_name = product_info.get('title', 'プレミアム商品')
+    domain = product_info.get('domain', 'ストア')
     
     # Template-based copy variants
     templates = [
         {
             'type': 'benefit',
-            'text': f"{product_name}\nQuality you can trust\nShop now and save!",
+            'text': f"{product_name}\n信頼できる品質\n今すぐショップで節約！",
             'score': 80
         },
         {
             'type': 'urgency', 
-            'text': f"Limited Time: {product_name}\nDon't miss out!\nOrder today",
+            'text': f"期間限定：{product_name}\nお見逃しなく！\n今日注文",
             'score': 85
         },
         {
             'type': 'promo',
-            'text': f"Special Offer: {product_name}\nBest price guaranteed\nBuy now",
+            'text': f"特別オファー：{product_name}\n最安値保証\n今すぐ購入",
             'score': 78
         },
         {
             'type': 'neutral',
-            'text': f"{product_name}\nAvailable at {domain}\nLearn more",
+            'text': f"{product_name}\n{domain}で入手可能\n詳しく見る",
             'score': 75
         },
         {
             'type': 'playful',
-            'text': f"Get your {product_name}!\nYou'll love it\nTry it now",
+            'text': f"{product_name}をゲット！\nきっと気に入ります\n今すぐお試し",
             'score': 82
         }
     ]

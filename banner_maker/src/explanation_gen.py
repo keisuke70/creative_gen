@@ -28,8 +28,8 @@ def generate_creative_explanation(text_content: str, title: str, description: st
     domain = urlparse(url).netloc.replace('www.', '')
     brand_context = _extract_brand_context(domain, title, text_content)
     
-    # Generate the explanation using OpenAI - Japanese prompt for better efficiency
-    prompt = f"""このランディングページのコンテンツを分析し、効果的な広告クリエイティブ制作のためのインサイトを提供してください。
+    # Generate the explanation using OpenAI - Japanese prompt to ensure Japanese output
+    prompt = f"""このランディングページのコンテンツを分析し、効果的な広告クリエイティブ制作のためのインサイトを日本語で提供してください。必ず日本語のみで回答すること。
 
 ページ情報:
 - URL: {url}
@@ -37,7 +37,7 @@ def generate_creative_explanation(text_content: str, title: str, description: st
 - 説明: {description}
 - コンテンツ: {text_content[:800]}...
 
-以下の構成で分析結果を提供してください:
+以下の構成で分析結果を日本語で提供してください:
 
 1. **商品・サービス概要** (2文程度)
 2. **ターゲットオーディエンス** (3つのポイント)
@@ -46,7 +46,7 @@ def generate_creative_explanation(text_content: str, title: str, description: st
 5. **メッセージング戦略** (2-3つのポイント)
 6. **CTA提案** (2-3つの選択肢)
 
-HTMLフォーマットで出力し、<h3>でセクション見出し、<ul><li>でポイント、<p>で段落を使用してください。実用的で実行可能な内容にしてください。"""
+HTMLフォーマットで出力し、<h3>でセクション見出し、<ul><li>でポイント、<p>で段落を使用してください。実用的で実行可能な内容にしてください。必ず日本語で回答すること。"""
 
     try:
         # Use same client setup as copy_gen.py
@@ -60,7 +60,7 @@ HTMLフォーマットで出力し、<h3>でセクション見出し、<ul><li>�
                 response = client.chat.completions.create(
                     model=model,
                     messages=[
-                        {"role": "system", "content": "あなたは広告心理学と消費者行動に詳しいマーケティング戦略家です。"},
+                        {"role": "system", "content": "あなたは広告心理学と消費者行動に詳しい日本のマーケティング戦略家です。必ず日本語でのみ回答してください。"},
                         {"role": "user", "content": prompt}
                     ],
                 )

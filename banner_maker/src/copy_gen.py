@@ -32,72 +32,72 @@ def generate_copy_and_visual_prompts(
         Brand Context: {brand_context}
         """.strip()
         
-        system_prompt = """君は最良のコピーライターだ. ユーザーのクリックを引き出す、正確で・競争力のある広告バナー向けコピーを作って欲しい。広告バナー画像に適切にオーバーレイできる2文以下の短いセンテンスを生成すること。"""
-        #system_prompt = """You are an expert marketing copywriter. Generate concise, compelling banner copy that drives action. Each variant should be 1-2 short sentences max, suitable for banner overlays."""
+        system_prompt = """君は日本のトップクラスのコピーライターだ。必ず日本語で、ユーザーのクリックを引き出す正確で競争力のある広告バナー向けコピーを作成すること。広告バナー画像に適切にオーバーレイできる2文以下の短い日本語センテンスを生成すること。出力は必ず日本語のみで行う。"""
         
         # Define copy variants with enhanced background prompt generation
         copy_variants = [
             {
                 "type": "benefit",
-                "instruction": "Focus on the main benefit or value proposition. What problem does this solve?",
-                "tone": "clear and benefit-focused",
-                "bg_instruction": "Create a background that visually reinforces trust, quality, and value delivery"
+                "instruction": "主要なベネフィットや価値提案に焦点を当てる。どんな問題を解決するか？",
+                "tone": "明確でベネフィット重視",
+                "bg_instruction": "信頼性、品質、価値提供を視覚的に補強する背景を作成"
             },
             {
                 "type": "urgency", 
-                "instruction": "Create urgency and immediate action. Use time-sensitive language.",
-                "tone": "urgent and action-driving",
-                "bg_instruction": "Create a background with dynamic energy that motivates immediate action"
+                "instruction": "緊急性と即座のアクションを作り出す。時間限定の言葉を使用する。",
+                "tone": "緊急性があり行動を促す",
+                "bg_instruction": "即座のアクションを促すダイナミックなエネルギーを持つ背景を作成"
             },
             {
                 "type": "promo",
-                "instruction": "Highlight deals, offers, or promotional aspects. Make it sales-focused.",
-                "tone": "promotional and enticing",
-                "bg_instruction": "Create a background that feels celebratory and highlights special offers"
+                "instruction": "お得情報、オファー、プロモーション要素をハイライト。セールス重視にする。",
+                "tone": "プロモーション的で魅力的",
+                "bg_instruction": "特別オファーをハイライトし、お祝い感のある背景を作成"
             },
             {
                 "type": "neutral",
-                "instruction": "Create straightforward, factual copy without hype. Focus on clear information.",
-                "tone": "professional and informative",
-                "bg_instruction": "Create a clean, professional background that supports clear communication"
+                "instruction": "誇張なしに、事実に基づく分かりやすいコピーを作成。明確な情報に焦点を当てる。",
+                "tone": "プロフェッショナルで情報的",
+                "bg_instruction": "明確なコミュニケーションをサポートする、クリーンでプロフェッショナルな背景を作成"
             },
             {
                 "type": "playful",
-                "instruction": "Use friendly, approachable language that feels personal and engaging.",
-                "tone": "friendly and conversational",
-                "bg_instruction": "Create a warm, approachable background that feels welcoming and friendly"
+                "instruction": "親しみやすく、個人的で魅力的なフレンドリーな言葉を使用する。",
+                "tone": "親しみやすく会話的",
+                "bg_instruction": "温かく親しみやすい、歓迎する印象を与える背景を作成"
             }
         ]
         
         # Single optimized prompt to generate ALL 5 variants in one call
-        user_prompt = f"""Analyze this business content and create 5 complete marketing copy variants with matching background prompts:
+        user_prompt = f"""このビジネスコンテンツを分析し、マッチングする背景プロンプトと合わせて5つの完全なマーケティングコピーバリエーションを日本語で作成してください：
 
-BUSINESS CONTENT:
-- Title: {title}
-- Description: {description}
-- Page Content: {text_content[:800]}
-- Brand Context: {brand_context}
+ビジネスコンテンツ:
+- タイトル: {title}
+- 説明: {description}
+- ページコンテンツ: {text_content[:800]}
+- ブランドコンテキスト: {brand_context}
 
-CRITICAL: Each background prompt must be tailored to its specific copy message and the business type. Consider the product/service nature, target audience, and copy tone when creating background descriptions.
+重要: 各背景プロンプトは、その特定のコピーメッセージとビジネスタイプに合わせてカスタマイズしてください。商品・サービスの性質、ターゲットオーディエンス、コピーのトーンを考慮して背景の説明を作成してください。
 
-TASK: Create ALL 5 variants in one response:
+タスク: すべての5つのバリエーションを1つの回答で作成：
 
-1. BENEFIT variant: Focus on main value proposition. What problem does this solve? (clear and benefit-focused tone)
-2. URGENCY variant: Create urgency and immediate action. Use time-sensitive language. (urgent and action-driving tone)
-3. PROMO variant: Highlight deals, offers, promotional aspects. Sales-focused. (promotional and enticing tone)
-4. NEUTRAL variant: Straightforward, factual copy without hype. Clear information. (professional and informative tone)
-5. PLAYFUL variant: Friendly, approachable language that feels personal. (friendly and conversational tone)
+1. BENEFIT バリエーション: 主要価値提案に焦点。どんな問題を解決するか？（明確でベネフィット重視のトーン）
+2. URGENCY バリエーション: 緊急性と即座のアクションを作成。時間限定の言葉を使用。（緊急性があり行動を促すトーン）
+3. PROMO バリエーション: お得情報、オファー、プロモーション要素をハイライト。セールス重視。（プロモーション的で魅力的なトーン）
+4. NEUTRAL バリエーション: 誇張なしに事実に基づく分かりやすいコピー。明確な情報。（プロフェッショナルで情報的なトーン）
+5. PLAYFUL バリエーション: 親しみやすく個人的な印象のフレンドリーな言葉。（親しみやすく会話的なトーン）
 
-REQUIREMENTS FOR EACH:
-- Length: 1-2 sentences maximum
-- Banner-ready text for overlay
-- Include sophisticated background prompt based on business analysis
-- Background: 絶対に文字・ロゴ・テキスト・文章・記号を含めない（ABSOLUTELY NO text, logos, words, readable elements）
-- Background: 抽象的な大気的要素のみ（gradients, shapes, textures, atmospheric elements only）
-- Background: Must complement the specific copy message and tone
-- Professional marketing quality
+各バリエーションの要件:
+- 長さ: 最大1-2文
+- バナーオーバーレイ用のテキスト
+- ビジネス分析に基づく洗練された背景プロンプトを含める
+- 背景: 絶対に文字・ロゴ・テキスト・文章・記号を含めない（ABSOLUTELY NO text, logos, words, readable elements）
+- 背景: 抽象的な大気的要素のみ（gradients, shapes, textures, atmospheric elements only）
+- 背景: 特定のコピーメッセージとトーンを補完する必要がある
+- プロフェッショナルマーケティング品質
+- すべて日本語で出力
 
-OUTPUT FORMAT (exactly):
+出力フォーマット（正確に）:
 BENEFIT:
 COPY: [benefit copy here]
 BACKGROUND: 文字・ロゴ・テキストを一切含まない抽象的なマーケティングバナー背景を作成：[この特定のベネフィットコピーに合う色彩・雰囲気・ムードを詳しく描写、ビジネスタイプに合うビジュアルスタイル、純粋に抽象的な要素のみ]
@@ -197,12 +197,12 @@ def generate_fallback_copy_with_prompts(text_content: str, title: str = "") -> L
     """
     Generate basic fallback copy variants with background prompts when API is unavailable
     """
-    base_title = title or "Transform Your Business"
+    base_title = title or "あなたのビジネスを変革"
     
     fallback_variants = [
         {
             "type": "benefit",
-            "text": f"Discover the power of {base_title.lower()}. Get results fast.",
+            "text": f"{base_title}の力を発見しよう。素早く結果を実感。",
             "tone": "benefit-focused",
             "char_count": 0,
             "background_prompt": "文字・ロゴ・テキストを一切含まない抽象的なプロフェッショナル背景：柔らかなブルーとグレーのトーンでクリーンでモダンなグラデーション、控えめな幾何学的形状、信頼と品質を強調する純粋に抽象的な要素のみ",
@@ -210,7 +210,7 @@ def generate_fallback_copy_with_prompts(text_content: str, title: str = "") -> L
         },
         {
             "type": "urgency",
-            "text": "Limited time offer. Act now before it's too late!",
+            "text": "期間限定オファー。手遅れになる前に今すぐ行動！",
             "tone": "urgent",
             "char_count": 0,
             "background_prompt": "文字・ロゴ・テキストを一切含まない抽象的な緊急感背景：鮮やかなレッドとオレンジのグラデーションで動的なモーションブラー効果、斜めのエネルギーライン、視覚的緊張感と即座性を生み出す純粋に抽象的な要素のみ",
@@ -218,7 +218,7 @@ def generate_fallback_copy_with_prompts(text_content: str, title: str = "") -> L
         },
         {
             "type": "promo", 
-            "text": "Special launch pricing. Save big today only.",
+            "text": "特別ローンチ価格。今日だけの大特価。",
             "tone": "promotional",
             "char_count": 0,
             "background_prompt": "文字・ロゴ・テキストを一切含まない抽象的なプロモーション背景：ゴールデンイエローと温かいオレンジでお祝いのバーストパターン、放射状の光効果、スパークル要素で祝祭的な雰囲気の純粋に抽象的な要素のみ",

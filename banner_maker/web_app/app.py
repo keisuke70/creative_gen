@@ -97,26 +97,98 @@ init_canva_oauth(app)
 
 
 def get_cached_scraping_data(url):
-    """Get cached scraping data for a URL"""
-    return scraping_cache.get(url)
+    """Get cached scraping data for a URL with validation"""
+    try:
+        cached_data = scraping_cache.get(url)
+        
+        if not cached_data:
+            print(f"🔍 CACHE CHECK for {url}: No cached data found")
+            return None
+        
+        # Validate cached data structure
+        if 'lp_data' in cached_data and 'page_meta' in cached_data:
+            # Check if the cached data is complete
+            lp_data = cached_data['lp_data']
+            page_meta = cached_data['page_meta']
+            
+            # Validate lp_data structure
+            if not isinstance(lp_data, dict) or 'text_content' not in lp_data:
+                print(f"⚠️ CACHE INVALID for {url}: lp_data is incomplete, will re-scrape")
+                logger.warning(f"Cached lp_data for {url} is incomplete, will re-scrape")
+                return None
+                
+            # Validate page_meta structure
+            if not isinstance(page_meta, dict) or 'title' not in page_meta or 'description' not in page_meta:
+                print(f"⚠️ CACHE INVALID for {url}: page_meta is incomplete, will re-scrape")
+                logger.warning(f"Cached page_meta for {url} is incomplete, will re-scrape")
+                return None
+            
+            print(f"✅ CACHE HIT for {url}: Valid data found")
+            logger.info(f"Retrieved valid cached data for: {url}")
+            return cached_data
+        else:
+            print(f"⚠️ CACHE INCOMPLETE for {url}: Missing lp_data or page_meta keys")
+            logger.warning(f"Cached data for {url} is missing lp_data or page_meta")
+            return None
+            
+    except Exception as e:
+        print(f"❌ CACHE EXCEPTION for {url}: {e}")
+        logger.error(f"Error retrieving cached data for {url}: {e}")
+        return None
 
 
 def cache_scraping_data(url, lp_data, page_meta):
-    """Cache scraping data for a URL"""
-    if url not in scraping_cache:
-        scraping_cache[url] = {}
-    
-    scraping_cache[url].update({
-        'lp_data': lp_data,
-        'page_meta': page_meta,
-        'timestamp': time.time()
-    })
-    
-    # Keep cache size manageable (max 50 URLs)
-    if len(scraping_cache) > 50:
-        # Remove oldest entry
-        oldest_url = min(scraping_cache.keys(), key=lambda k: scraping_cache[k]['timestamp'])
-        del scraping_cache[oldest_url]
+    """Cache scraping data for a URL with validation"""
+    try:
+        # Validate input data
+        if not url:
+            print("❌ CACHE ERROR: URL is empty")
+            logger.error("Cannot cache data: URL is empty")
+            return
+        
+        if not lp_data or not page_meta:
+            print(f"❌ CACHE ERROR for {url}: Missing lp_data or page_meta")
+            logger.error(f"Cannot cache data for {url}: Missing lp_data or page_meta")
+            return
+        
+        # Ensure we have the required fields in lp_data
+        if not isinstance(lp_data, dict) or 'text_content' not in lp_data:
+            print(f"❌ CACHE ERROR for {url}: Invalid lp_data structure")
+            logger.error(f"Cannot cache data for {url}: Invalid lp_data structure")
+            return
+            
+        # Ensure we have the required fields in page_meta
+        if not isinstance(page_meta, dict) or 'title' not in page_meta or 'description' not in page_meta:
+            print(f"❌ CACHE ERROR for {url}: Invalid page_meta structure")
+            logger.error(f"Cannot cache data for {url}: Invalid page_meta structure")
+            return
+        
+        # Initialize cache entry if it doesn't exist
+        if url not in scraping_cache:
+            scraping_cache[url] = {}
+        
+        # Cache the complete scraping data
+        scraping_cache[url].update({
+            'lp_data': lp_data,
+            'page_meta': page_meta,
+            'timestamp': time.time()
+        })
+        
+        print(f"💾 CACHE SAVED for {url}: Complete scraping data stored")
+        logger.info(f"Successfully cached complete scraping data for: {url}")
+        
+        # Keep cache size manageable (max 50 URLs)
+        if len(scraping_cache) > 50:
+            # Remove oldest entry
+            oldest_url = min(scraping_cache.keys(), key=lambda k: scraping_cache[k].get('timestamp', 0))
+            del scraping_cache[oldest_url]
+            print(f"🗑️ CACHE CLEANUP: Removed oldest entry: {oldest_url}")
+            logger.info(f"Removed oldest cache entry: {oldest_url}")
+            
+    except Exception as e:
+        print(f"❌ CACHE EXCEPTION for {url}: {e}")
+        logger.error(f"Error caching scraping data for {url}: {e}")
+        # Don't raise exception, just log the error
 
 
 def cache_copy_data(url, copy_variants, best_copy):
@@ -661,24 +733,48 @@ def get_copy_variants():
                 'cached': True
             })
         
-        # Get page data - scrape if not available
+        # Get page data - scrape if not available or if cache is incomplete
         cached_page_data = get_cached_scraping_data(url)
-        if not cached_page_data:
+        
+        # Check if cache is incomplete or missing critical data
+        if not cached_page_data or 'lp_data' not in cached_page_data or 'page_meta' not in cached_page_data:
+            if cached_page_data:
+                print(f"🔄 CACHE INCOMPLETE for copy variants {url}: Re-scraping to ensure data integrity.")
+                logger.warning("Incomplete cache found for copy variants. Re-scraping to ensure data integrity.")
+            else:
+                print(f"🔄 NO CACHE FOUND for copy variants {url}: Performing fresh scraping.")
+                logger.info("No cached data found for copy variants. Performing fresh scraping.")
+            
             # Auto-scrape the page
-            import asyncio
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            
-            lp_data = loop.run_until_complete(scrape_landing_page(url))
-            page_meta = loop.run_until_complete(get_page_title_and_description(url))
-            
-            # Cache the scraping results
-            cache_scraping_data(url, lp_data, page_meta)
-            
-            loop.close()
+            try:
+                print(f"📡 Starting fresh scrape for copy variants: {url}")
+                import asyncio
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                
+                lp_data = loop.run_until_complete(scrape_landing_page(url))
+                page_meta = loop.run_until_complete(get_page_title_and_description(url))
+                
+                # Ensure we have the scraping results before proceeding
+                if not lp_data or not page_meta:
+                    raise Exception("Failed to scrape page data")
+                
+                # Cache the scraping results completely
+                cache_scraping_data(url, lp_data, page_meta)
+                print(f"✅ FRESH SCRAPE COMPLETED for copy variants {url}: Data cached successfully")
+                logger.info(f"Successfully scraped and cached data for copy variants: {url}")
+                
+                loop.close()
+                
+            except Exception as scrape_error:
+                print(f"❌ COPY VARIANTS SCRAPE FAILED for {url}: {scrape_error}")
+                logger.error(f"Web scraping failed for copy variants: {scrape_error}")
+                return jsonify({'error': f'Failed to scrape page for copy variants: {str(scrape_error)}'}), 500
         else:
+            print(f"✅ USING CACHED DATA for copy variants {url}: Complete data found")
             lp_data = cached_page_data['lp_data']
             page_meta = cached_page_data['page_meta']
+            logger.info(f"Using cached data for copy variants: {url}")
         
         # Generate copy variants
         copy_variants = generate_copy_and_visual_prompts(
@@ -714,11 +810,21 @@ def generate_copy_variants():
         lp_data = None
         page_meta = None
         
-        # Get page data - scrape if not available
+        # Get page data - scrape if not available or if cache is incomplete
         cached_page_data = get_cached_scraping_data(url)
-        if not cached_page_data:
+        
+        # Check if cache is incomplete or missing critical data
+        if not cached_page_data or 'lp_data' not in cached_page_data or 'page_meta' not in cached_page_data:
+            if cached_page_data:
+                print(f"🔄 CACHE INCOMPLETE for {url}: Re-scraping to ensure data integrity.")
+                logger.warning("Incomplete cache found. Re-scraping to ensure data integrity.")
+            else:
+                print(f"🔄 NO CACHE FOUND for {url}: Performing fresh scraping.")
+                logger.info("No cached data found. Performing fresh scraping.")
+            
             # Try to auto-scrape the page
             try:
+                print(f"📡 Starting fresh scrape for: {url}")
                 import asyncio
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
@@ -726,13 +832,20 @@ def generate_copy_variants():
                 lp_data = loop.run_until_complete(scrape_landing_page(url))
                 page_meta = loop.run_until_complete(get_page_title_and_description(url))
                 
-                # Cache the scraping results
+                # Ensure we have the scraping results before proceeding
+                if not lp_data or not page_meta:
+                    raise Exception("Failed to scrape page data")
+                
+                # Cache the scraping results completely
                 cache_scraping_data(url, lp_data, page_meta)
+                print(f"✅ FRESH SCRAPE COMPLETED for {url}: Data cached successfully")
+                logger.info(f"Successfully scraped and cached data for URL: {url}")
                 
                 loop.close()
                 
             except Exception as scrape_error:
-                print(f"Web scraping failed: {scrape_error}")
+                print(f"❌ SCRAPE FAILED for {url}: {scrape_error}")
+                logger.error(f"Web scraping failed: {scrape_error}")
                 # Fallback to mock copy generation
                 try:
                     from src.mock_copy_gen import generate_mock_copy_variants
@@ -746,11 +859,13 @@ def generate_copy_variants():
                     })
                     
                 except Exception as mock_error:
-                    print(f"Mock copy generation also failed: {mock_error}")
+                    logger.error(f"Mock copy generation also failed: {mock_error}")
                     return jsonify({'error': f'Copy generation failed: web scraping error - {str(scrape_error)}'}), 500
         else:
+            print(f"✅ USING CACHED DATA for {url}: Complete data found")
             lp_data = cached_page_data['lp_data']
             page_meta = cached_page_data['page_meta']
+            logger.info(f"Using cached data for URL: {url}")
         
         # Verify that we have the required data
         if not lp_data or not page_meta:
@@ -785,8 +900,7 @@ def save_selected_copy():
         selected_copy = data.get('selected_copy')
         
         if not url or not selected_copy:
-            return jsonify({'error': 'URL and selected copy are required'}), 400
-        
+            return jsonify({'error': 'URL and selected copy are required'}),
         # Cache the selected copy for this URL
         if url not in scraping_cache:
             scraping_cache[url] = {}
@@ -798,11 +912,11 @@ def save_selected_copy():
         
         return jsonify({
             'success': True,
-            'message': 'Copy selection saved'
+            'message': 'Selected copy saved successfully.'
         })
         
     except Exception as e:
-        logger.error(f"Save copy error: {e}", exc_info=True)
+        logger.error(f"Error saving selected copy: {e}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
 
@@ -895,24 +1009,48 @@ def generate_explanation():
         if not url:
             return jsonify({'error': 'URL is required'}), 400
         
-        # Get page data - scrape if not available
+        # Get page data - scrape if not available or if cache is incomplete
         cached_page_data = get_cached_scraping_data(url)
-        if not cached_page_data:
+        
+        # Check if cache is incomplete or missing critical data
+        if not cached_page_data or 'lp_data' not in cached_page_data or 'page_meta' not in cached_page_data:
+            if cached_page_data:
+                print(f"🔄 CACHE INCOMPLETE for explanation {url}: Re-scraping to ensure data integrity.")
+                logger.warning("Incomplete cache found for explanation. Re-scraping to ensure data integrity.")
+            else:
+                print(f"🔄 NO CACHE FOUND for explanation {url}: Performing fresh scraping.")
+                logger.info("No cached data found for explanation. Performing fresh scraping.")
+            
             # Auto-scrape the page
-            import asyncio
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            
-            lp_data = loop.run_until_complete(scrape_landing_page(url))
-            page_meta = loop.run_until_complete(get_page_title_and_description(url))
-            
-            # Cache the scraping results
-            cache_scraping_data(url, lp_data, page_meta)
-            
-            loop.close()
+            try:
+                print(f"📡 Starting fresh scrape for explanation: {url}")
+                import asyncio
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                
+                lp_data = loop.run_until_complete(scrape_landing_page(url))
+                page_meta = loop.run_until_complete(get_page_title_and_description(url))
+                
+                # Ensure we have the scraping results before proceeding
+                if not lp_data or not page_meta:
+                    raise Exception("Failed to scrape page data")
+                
+                # Cache the scraping results completely
+                cache_scraping_data(url, lp_data, page_meta)
+                print(f"✅ FRESH SCRAPE COMPLETED for explanation {url}: Data cached successfully")
+                logger.info(f"Successfully scraped and cached data for explanation: {url}")
+                
+                loop.close()
+                
+            except Exception as scrape_error:
+                print(f"❌ EXPLANATION SCRAPE FAILED for {url}: {scrape_error}")
+                logger.error(f"Web scraping failed for explanation: {scrape_error}")
+                return jsonify({'error': f'Failed to scrape page for explanation: {str(scrape_error)}'}), 500
         else:
+            print(f"✅ USING CACHED DATA for explanation {url}: Complete data found")
             lp_data = cached_page_data['lp_data']
             page_meta = cached_page_data['page_meta']
+            logger.info(f"Using cached data for explanation: {url}")
         
         # Generate creative explanation using the enhanced scraping data
         explanation = generate_creative_explanation(

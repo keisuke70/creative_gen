@@ -26,6 +26,6 @@ if __name__ == '__main__':
         app.run(host='0.0.0.0', port=int(os.getenv('PORT', 5000)), debug=False)
     else:
         print("🔧 Starting Banner Maker in development mode...")
-        print("📱 Web interface: http://localhost:5000")
-        print("🛠️  API endpoint: http://localhost:5000/api")
+        print("📱 Web interface: http://127.0.0.1:5000")
+        print("🛠️  API endpoint: http://127.0.0.1:5000/api")
         app.run(host='127.0.0.1', port=5000, debug=True)

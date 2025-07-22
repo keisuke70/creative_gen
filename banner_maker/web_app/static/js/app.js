@@ -642,14 +642,36 @@ class BannerMaker {
             return;
         }
 
-        // Check if we have uploaded images
-        if (this.uploadedImages.length === 0) {
-            this.showError('Please upload at least one image first');
-            return;
-        }
 
         // Store current URL for reference
         this.currentUrl = url;
+
+        // Upload background to Canva first if generated locally
+        if (this.generatedBackgroundPath && !this.generatedBackgroundId) {
+            try {
+                document.getElementById('generateBtn').innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Uploading background...';
+                
+                const bgResponse = await fetch('/api/upload-background-to-canva', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        background_file_path: this.generatedBackgroundPath,
+                        background_filename: this.generatedBackgroundFilename
+                    })
+                });
+                
+                const bgResult = await bgResponse.json();
+                if (bgResult.success) {
+                    this.generatedBackgroundId = bgResult.background_asset_id;
+                } else {
+                    console.warn('Failed to upload background to Canva:', bgResult.error);
+                }
+            } catch (error) {
+                console.warn('Error uploading background to Canva:', error);
+            }
+        }
 
         const formData = {
             url: url,
@@ -795,6 +817,14 @@ class BannerMaker {
         if (result.design_id) {
             this.lastDesignId = result.design_id;
             console.log('Stored design ID for future background uploads:', this.lastDesignId);
+            
+            // Show separate send background button if background was generated locally but not included
+            if (this.generatedBackgroundPath && !this.generatedBackgroundId) {
+                const sendBackgroundBtn = document.getElementById('sendBackgroundBtn');
+                if (sendBackgroundBtn) {
+                    sendBackgroundBtn.style.display = 'inline-block';
+                }
+            }
         }
         
         // Show results section
@@ -1943,10 +1973,13 @@ class BannerMaker {
             const result = await response.json();
 
             if (result.success) {
-                this.generatedBackgroundId = result.background_asset_id;
+                // Store generated background data for upload later
+                this.generatedBackgroundPath = result.background_file_path;
+                this.generatedBackgroundFilename = result.background_filename;
                 this.showBackgroundPreview(result.background_url);
                 this.updateBackgroundStatus(true);
-                this.showSuccessMessage('AI background generated successfully!');
+                this.showSuccessMessage('AI background generated successfully! Click "Send Background to Canva" to upload it.');
+                this.showSendBackgroundButton();
                 this.checkIfReadyForBannerGeneration();
             } else {
                 throw new Error(result.error || 'Failed to generate background');
@@ -1966,13 +1999,8 @@ class BannerMaker {
     }
     
     async sendBackgroundToCanva() {
-        if (!this.generatedBackgroundId) {
+        if (!this.generatedBackgroundPath) {
             this.showError('No background generated yet. Please generate a background first.');
-            return;
-        }
-        
-        if (!this.lastDesignId) {
-            this.showError('No existing Canva design found. Please create a new design first using "Send to Canva".');
             return;
         }
         
@@ -1984,33 +2012,25 @@ class BannerMaker {
             sendBtn.disabled = true;
             sendBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Uploading...';
             
-            const response = await fetch('/api/add-background-to-design', {
+            const response = await fetch('/api/upload-background-to-canva', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
                 },
                 body: JSON.stringify({
-                    design_id: this.lastDesignId,
-                    background_asset_id: this.generatedBackgroundId
+                    background_file_path: this.generatedBackgroundPath,
+                    background_filename: this.generatedBackgroundFilename
                 })
             });
             
             const result = await response.json();
             
             if (result.success) {
-                this.showSuccessMessage('🎨 Background uploaded! It\'s now available in your Canva "Uploads" section.');
-                // Show link to design
-                if (result.design_url) {
-                    setTimeout(() => {
-                        const viewLink = `<a href="${result.design_url}" target="_blank" class="text-blue-600 underline ml-2">Open Design to Add Background</a>`;
-                        const successMsg = document.querySelector('.success-message');
-                        if (successMsg) {
-                            successMsg.innerHTML += viewLink;
-                        }
-                    }, 1000);
-                }
+                // Store the asset ID for future use
+                this.generatedBackgroundId = result.background_asset_id;
+                this.showSuccessMessage('🎨 Background uploaded to Canva successfully! It\'s now available in your Canva "Uploads" section.');
             } else {
-                throw new Error(result.error || 'Failed to add background to design');
+                throw new Error(result.error || 'Failed to upload background to Canva');
             }
             
         } catch (error) {
@@ -2063,6 +2083,15 @@ class BannerMaker {
                 </span>
             `;
             statusDisplay.className = 'w-full px-4 py-3 border border-red-300 rounded-lg bg-red-50';
+        }
+    }
+    
+    showSendBackgroundButton() {
+        const sendBtn = document.getElementById('sendBackgroundBtn');
+        if (sendBtn) {
+            // Hide initially - will be shown after main send to Canva
+            sendBtn.style.display = 'none';
+            sendBtn.disabled = false;
         }
     }
 
