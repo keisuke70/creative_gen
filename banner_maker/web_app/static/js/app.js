@@ -278,17 +278,7 @@ class BannerMaker {
                 await this.cleanupUploadedImage(this.uploadedImagePath);
             }
 
-            // Show preview immediately
-            const reader = new FileReader();
-            reader.onload = (e) => {
-                const previewImage = document.getElementById('previewImage');
-                const uploadedFileName = document.getElementById('uploadedFileName');
-                previewImage.src = e.target.result;
-                uploadedFileName.textContent = file.name;
-                document.getElementById('uploadArea').classList.add('hidden');
-                uploadPreview.classList.remove('hidden');
-            };
-            reader.readAsDataURL(file);
+            // Show preview immediately using the grid system - will be updated after upload
 
             // Upload file to server
             const formData = new FormData();
@@ -302,9 +292,17 @@ class BannerMaker {
             const result = await response.json();
 
             if (result.success) {
-                this.uploadedImagePath = result.filepath;
-                // Regular file upload - not an extracted image, no cleanup needed
-                this.isExtractedImage = false;
+                // Add to uploaded images array
+                this.uploadedImages.push({
+                    path: result.filepath,
+                    name: file.name,
+                    isExtracted: false,
+                    id: `uploaded-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+                });
+
+                // Update UI to show uploaded images
+                this.updateMultipleImagePreview();
+                
             } else {
                 throw new Error(result.error || 'Upload failed');
             }
@@ -1509,105 +1507,82 @@ class BannerMaker {
     }
 
     async showCropModal(image) {
-        // Create crop modal with loading state
-        const modal = document.createElement('div');
-        modal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4';
-        modal.innerHTML = `
-            <div class="bg-white rounded-lg crop-modal overflow-hidden flex flex-col">
-                <div class="p-4 border-b border-gray-200 flex justify-between items-center flex-shrink-0">
-                    <h3 class="text-lg font-semibold">Crop Image</h3>
-                    <button id="closeCropModal" class="text-gray-500 hover:text-gray-700">
-                        <i class="fas fa-times"></i>
-                    </button>
-                </div>
-                <div class="flex-1 p-4 overflow-hidden">
-                    <div id="cropImageContainer" class="crop-image-container mb-4">
-                        <div class="loading-state">
-                            <i class="fas fa-spinner fa-spin text-2xl text-gray-400 mb-2"></i>
-                            <p class="text-gray-600">Loading image for cropping...</p>
-                        </div>
-                    </div>
-                    <div class="flex justify-between items-center flex-shrink-0 mt-4">
-                        <div class="text-sm text-gray-600">
-                            <p><strong>Original:</strong> ${image.width && image.height ? `${image.width}×${image.height}` : 'Unknown'}</p>
-                            <p class="text-xs text-gray-500 mt-1">💡 Mouse wheel to zoom, drag to move image</p>
-                            <p class="text-xs text-gray-500">🎯 Drag corners to resize crop area</p>
-                        </div>
-                        <div class="space-x-2">
-                            <button id="resetCrop" class="px-4 py-2 bg-gray-500 text-white rounded hover:bg-gray-600 disabled:opacity-50" disabled>
-                                <i class="fas fa-undo mr-2"></i>Reset
-                            </button>
-                            <button id="useCropped" class="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:opacity-50" disabled>
-                                <i class="fas fa-check mr-2"></i>Use Cropped Image
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        `;
-        
-        document.body.appendChild(modal);
-
-        let cropper = null;
-
-        // Close modal function
-        const closeModal = async () => {
-            if (cropper) {
-                cropper.destroy();
-            }
-            // Clean up temp image if it exists
-            if (this.currentTempImage) {
-                await this.cleanupTempImage(this.currentTempImage);
-                this.currentTempImage = null;
-            }
-            modal.remove();
-        };
-
-        // Close button event
-        modal.querySelector('#closeCropModal').addEventListener('click', closeModal);
-
-        // Close modal when clicking outside
-        modal.addEventListener('click', (e) => {
-            if (e.target === modal) {
-                closeModal();
-            }
-        });
-
         try {
-            // Try to load image through our proxy to avoid CORS issues
-            const proxiedImageUrl = await this.getProxiedImageUrl(image.src, image.alt || 'crop_image');
+            console.log('Opening crop modal for image:', image);
             
-            // Create image element with the proxied URL
+            // Create modal immediately with loading state
+            const modal = document.createElement('div');
+            modal.className = 'crop-modal-overlay';
+            modal.innerHTML = `
+                <div class="crop-modal-content">
+                    <div class="p-4 border-b border-gray-200 flex justify-between items-center flex-shrink-0">
+                        <h3 class="text-lg font-semibold">Crop Image</h3>
+                        <button id="closeCropModal" class="text-gray-500 hover:text-gray-700 text-xl">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
+                    <div class="flex-1 p-4 overflow-hidden">
+                        <div id="cropImageContainer" class="crop-image-container mb-4">
+                            <div class="loading-state">
+                                <i class="fas fa-spinner fa-spin text-2xl mb-2"></i>
+                                <p>Preparing image for cropping...</p>
+                                <p class="text-xs text-gray-500 mt-1">Downloading and processing image (CORS bypass)</p>
+                            </div>
+                        </div>
+                        <div class="flex justify-between items-center flex-shrink-0 mt-4">
+                            <div class="text-sm text-gray-600">
+                                <p><strong>Original:</strong> ${image.width && image.height ? `${image.width}×${image.height}` : 'Unknown'}</p>
+                                <p class="text-xs text-gray-500 mt-1">💡 Mouse wheel to zoom, drag to move image</p>
+                                <p class="text-xs text-gray-500">🎯 Drag corners to resize crop area</p>
+                            </div>
+                            <div class="space-x-2">
+                                <button id="resetCrop" class="px-4 py-2 bg-gray-500 text-white rounded hover:bg-gray-600 disabled:opacity-50" disabled>
+                                    <i class="fas fa-undo mr-2"></i>Reset
+                                </button>
+                                <button id="useCropped" class="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:opacity-50" disabled>
+                                    <i class="fas fa-check mr-2"></i>Use Cropped Image
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            document.body.appendChild(modal);
+            console.log('Modal added to DOM with loading state');
+            
+            // Now get the proxied image URL in the background
+            let proxiedImageUrl;
+            try {
+                proxiedImageUrl = await this.getProxiedImageUrl(image.src, image.alt || 'crop_image');
+                if (!proxiedImageUrl) {
+                    throw new Error('No proxied URL returned');
+                }
+            } catch (proxyError) {
+                console.warn('Image proxy failed, using original URL:', proxyError);
+                proxiedImageUrl = image.src;
+            }
+            
+            // Replace loading state with actual image
             const cropImageContainer = modal.querySelector('#cropImageContainer');
             cropImageContainer.innerHTML = `
                 <img id="cropImage" src="${proxiedImageUrl}" 
                      alt="${image.alt || 'Image to crop'}" 
                      crossorigin="anonymous"
-                     style="max-width: 100%; max-height: 60vh; width: auto; height: auto;">
+                     style="max-width: 100%; max-height: 60vh; width: auto; height: auto; display: block;">
             `;
-
+            
             const cropImage = modal.querySelector('#cropImage');
             
-            // Wait for image to load
-            await new Promise((resolve, reject) => {
-                const timeout = setTimeout(() => {
-                    reject(new Error('Image loading timed out'));
-                }, 10000); // 10 second timeout
-                
-                cropImage.onload = () => {
-                    clearTimeout(timeout);
-                    resolve();
-                };
-                cropImage.onerror = () => {
-                    clearTimeout(timeout);
-                    reject(new Error('Failed to load image'));
-                };
-            });
+            // Check if Cropper is available
+            if (typeof Cropper === 'undefined') {
+                throw new Error('Cropper.js library not loaded. Please refresh the page and try again.');
+            }
 
-            // Initialize cropper with responsive settings
-            cropper = new Cropper(cropImage, {
-                aspectRatio: NaN, // Free aspect ratio
-                viewMode: 1, // Restrict crop box not to exceed the size of the canvas
+            // Initialize cropper after image loads
+            const cropper = new Cropper(cropImage, {
+                aspectRatio: NaN,
+                viewMode: 1,
                 dragMode: 'move',
                 autoCropArea: 0.8,
                 restore: false,
@@ -1632,60 +1607,69 @@ class BannerMaker {
                 cropBoxResizable: true,
                 minContainerWidth: 200,
                 minContainerHeight: 100,
+                ready() {
+                    console.log('Cropper initialized successfully');
+                    // Enable buttons when cropper is ready
+                    const resetBtn = modal.querySelector('#resetCrop');
+                    const useBtn = modal.querySelector('#useCropped');
+                    if (resetBtn) resetBtn.disabled = false;
+                    if (useBtn) useBtn.disabled = false;
+                },
             });
 
-            // Enable buttons
+            // Close modal function
+            const closeModal = async () => {
+                console.log('Closing crop modal...');
+                if (cropper) {
+                    cropper.destroy();
+                }
+                if (this.currentTempImage) {
+                    await this.cleanupTempImage(this.currentTempImage);
+                    this.currentTempImage = null;
+                }
+                modal.remove();
+            };
+
+            // Event listeners
+            modal.querySelector('#closeCropModal').addEventListener('click', closeModal);
+            
+            modal.addEventListener('click', (e) => {
+                if (e.target === modal) {
+                    closeModal();
+                }
+            });
+            
             const resetBtn = modal.querySelector('#resetCrop');
             const useBtn = modal.querySelector('#useCropped');
-            resetBtn.disabled = false;
-            useBtn.disabled = false;
 
-            // Reset crop button
             resetBtn.addEventListener('click', () => {
                 cropper.reset();
             });
 
-            // Use cropped image button
             useBtn.addEventListener('click', async () => {
                 try {
                     useBtn.disabled = true;
                     useBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Processing...';
 
-                    // Try to get cropped canvas
-                    let canvas;
-                    try {
-                        canvas = cropper.getCroppedCanvas({
-                            maxWidth: 2048,
-                            maxHeight: 2048,
-                            imageSmoothingEnabled: true,
-                            imageSmoothingQuality: 'high',
-                        });
-                    } catch (canvasError) {
-                        console.error('Canvas generation failed:', canvasError);
-                        throw new Error('Cannot crop this image due to CORS restrictions. Try using the original image instead.');
-                    }
+                    const canvas = cropper.getCroppedCanvas({
+                        maxWidth: 2048,
+                        maxHeight: 2048,
+                        imageSmoothingEnabled: true,
+                        imageSmoothingQuality: 'high',
+                    });
                     
                     if (!canvas) {
-                        throw new Error('Failed to generate cropped image canvas. This may be due to CORS restrictions.');
+                        throw new Error('Failed to generate cropped image canvas.');
                     }
                     
-                    // Try to convert to data URL
-                    let croppedDataUrl;
-                    try {
-                        croppedDataUrl = canvas.toDataURL('image/jpeg', 0.9);
-                    } catch (dataUrlError) {
-                        console.error('Data URL conversion failed:', dataUrlError);
-                        throw new Error('Cannot process this image due to security restrictions. Try using the original image instead.');
-                    }
+                    const croppedDataUrl = canvas.toDataURL('image/jpeg', 0.9);
                     
                     if (!croppedDataUrl || croppedDataUrl === 'data:,') {
-                        throw new Error('Failed to process cropped image. Try using the original image instead.');
+                        throw new Error('Failed to process cropped image.');
                     }
                     
-                    // Upload cropped image
                     await this.uploadCroppedImage(croppedDataUrl, image.alt || 'cropped_image');
                     
-                    // Clean up temp image before closing
                     if (this.currentTempImage) {
                         await this.cleanupTempImage(this.currentTempImage);
                         this.currentTempImage = null;
@@ -1696,49 +1680,22 @@ class BannerMaker {
                     
                 } catch (error) {
                     console.error('Error cropping image:', error);
-                    
-                    // Show user-friendly error message with fallback option
-                    const errorMessage = error.message.includes('CORS') || error.message.includes('security') || error.message.includes('canvas') ?
-                        'This image cannot be cropped due to security restrictions.' :
-                        'Failed to crop image: ' + error.message;
-                    
-                    this.showError(errorMessage + ' You can still use the original image by dragging it to the upload area.');
-                    
+                    this.showError('Failed to crop image: ' + error.message);
+                } finally {
                     useBtn.disabled = false;
                     useBtn.innerHTML = '<i class="fas fa-check mr-2"></i>Use Cropped Image';
                 }
             });
 
         } catch (error) {
-            console.error('Error loading image for cropping:', error);
-            
-            // Show error in modal
-            const cropImageContainer = modal.querySelector('#cropImageContainer');
-            cropImageContainer.innerHTML = `
-                <div class="text-center py-8">
-                    <i class="fas fa-exclamation-triangle text-red-500 text-3xl mb-3"></i>
-                    <p class="text-red-600 mb-2">Failed to load image for cropping</p>
-                    <p class="text-sm text-gray-500">${error.message}</p>
-                    <button id="useOriginal" class="mt-4 px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600">
-                        <i class="fas fa-download mr-2"></i>Use Original Image Instead
-                    </button>
-                </div>
-            `;
-
-            // Use original image button
-            modal.querySelector('#useOriginal').addEventListener('click', async () => {
-                try {
-                    await this.handleExtractedImageDrop(image);
-                    closeModal();
-                } catch (error) {
-                    this.showError('Failed to use original image: ' + error.message);
-                }
-            });
+            console.error('Error setting up crop modal:', error);
+            this.showError('Failed to open crop modal: ' + error.message);
         }
     }
 
     async getProxiedImageUrl(imageUrl, filename) {
         try {
+            // Use temporary proxy approach for cropping modal
             const response = await fetch('/api/proxy-image-temp', {
                 method: 'POST',
                 headers: {
@@ -1750,11 +1707,8 @@ class BannerMaker {
                 })
             });
 
-            if (!response.ok) {
-                throw new Error(`HTTP ${response.status}: Failed to proxy image`);
-            }
-
             const result = await response.json();
+            
             if (result.success && result.is_temp) {
                 // Store temp filename for cleanup
                 this.currentTempImage = result.temp_filename;
@@ -1808,15 +1762,16 @@ class BannerMaker {
             const result = await response.json();
             
             if (result.success) {
-                this.uploadedImagePath = result.filepath;
-                
-                // Show preview
-                const previewImage = document.getElementById('previewImage');
-                const uploadedFileName = document.getElementById('uploadedFileName');
-                previewImage.src = dataUrl;
-                uploadedFileName.textContent = `Cropped: ${filename}`;
-                document.getElementById('uploadArea').classList.add('hidden');
-                document.getElementById('uploadPreview').classList.remove('hidden');
+                // Add to uploaded images array
+                this.uploadedImages.push({
+                    path: result.filepath,
+                    name: `Cropped: ${filename}`,
+                    isExtracted: false,
+                    id: `uploaded-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+                });
+
+                // Update UI to show uploaded images
+                this.updateMultipleImagePreview();
                 
             } else {
                 throw new Error(result.error || 'Upload failed');
@@ -1834,6 +1789,18 @@ class BannerMaker {
         const sizes = ['Bytes', 'KB', 'MB', 'GB'];
         const i = Math.floor(Math.log(bytes) / Math.log(k));
         return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    }
+
+    // Debug function to test modal display
+    testCropModal() {
+        console.log('Testing crop modal...');
+        const testImage = {
+            src: 'https://via.placeholder.com/400x300',
+            alt: 'Test Image',
+            width: 400,
+            height: 300
+        };
+        this.showCropModal(testImage);
     }
 
     showSuccessMessage(message) {
