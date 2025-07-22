@@ -10,10 +10,12 @@ import os
 import tempfile
 import logging
 import requests
+import base64
 from typing import Optional, List, Dict, Any
 from PIL import Image, ImageDraw
 from dotenv import load_dotenv
 import openai
+from io import BytesIO
 
 from .canva_api import CanvaAPI, CanvaAPIError
 
@@ -22,6 +24,21 @@ load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '..', '..', '.en
 
 
 logger = logging.getLogger(__name__)
+
+
+def _extract_image_bytes(img_obj) -> bytes:
+    """
+    Accepts a single item from response.data and returns raw bytes.
+    
+    Works for gpt-image-1 (.b64_json) and DALL-E (.url).
+    """
+    if getattr(img_obj, "b64_json", None):
+        return base64.b64decode(img_obj.b64_json)
+    if getattr(img_obj, "url", None):
+        resp = requests.get(img_obj.url, timeout=30)
+        resp.raise_for_status()
+        return resp.content
+    raise RuntimeError("No image payload in response")
 
 
 def maybe_generate_background(product, copy_content: Optional[Dict[str, Any]] = None, api: Optional[CanvaAPI] = None) -> Optional[str]:
@@ -125,27 +142,51 @@ def generate_ai_background_with_stored_prompt(copy_content: Dict[str, Any], prod
         
         logger.info(f"Generating AI background using stored prompt for {copy_type} copy")
         
-        # Generate image with OpenAI DALL-E
+        # Generate image with OpenAI gpt-image-1 (preferred) with DALL-E fallback
         client = openai.OpenAI(api_key=openai_api_key)
         
-        response = client.images.generate(
-            model="dall-e-3",
-            prompt=enhanced_prompt,
-            size="1024x1024",
-            quality="standard",
-            n=1
-        )
-        
-        # Download the generated image
-        image_url = response.data[0].url
-        image_response = requests.get(image_url, timeout=30)
-        
-        if image_response.status_code == 200:
-            logger.info(f"Successfully generated AI background using stored prompt")
-            return image_response.content
-        else:
-            logger.error(f"Failed to download AI generated image: {image_response.status_code}")
-            return None
+        # Try gpt-image-1 first
+        try:
+            logger.info("Attempting background generation with gpt-image-1")
+            response = client.images.generate(
+                model="gpt-image-1",
+                prompt=enhanced_prompt,
+                size="1024x1024",
+                n=1
+            )
+            
+            # Extract image bytes (Base64 for gpt-image-1, URL for DALL-E)
+            img_bytes = _extract_image_bytes(response.data[0])
+            logger.info(f"Successfully generated AI background using gpt-image-1")
+            return img_bytes
+            
+        except Exception as gpt_image_error:
+            logger.warning(f"gpt-image-1 failed: {gpt_image_error}, falling back to DALL-E-3")
+            
+            # Fallback to DALL-E-3
+            try:
+                response = client.images.generate(
+                    model="dall-e-3",
+                    prompt=enhanced_prompt,
+                    size="1024x1024",
+                    quality="standard",
+                    n=1
+                )
+                
+                # Download the generated image (DALL-E uses URLs)
+                image_url = response.data[0].url
+                image_response = requests.get(image_url, timeout=30)
+                
+                if image_response.status_code == 200:
+                    logger.info(f"Successfully generated AI background using DALL-E-3 fallback")
+                    return image_response.content
+                else:
+                    logger.error(f"Failed to download DALL-E generated image: {image_response.status_code}")
+                    return None
+                    
+            except Exception as dalle_error:
+                logger.error(f"Both gpt-image-1 and DALL-E-3 failed: {dalle_error}")
+                return None
             
     except Exception as e:
         logger.warning(f"AI background generation with stored prompt failed: {e}")
@@ -208,27 +249,51 @@ def generate_ai_background(copy_content: Dict[str, Any], product) -> Optional[by
         
         logger.info(f"Generating AI background with prompt: {background_prompt[:100]}...")
         
-        # Generate image with OpenAI DALL-E
+        # Generate image with OpenAI gpt-image-1 (preferred) with DALL-E fallback
         client = openai.OpenAI(api_key=openai_api_key)
         
-        response = client.images.generate(
-            model="dall-e-3",
-            prompt=background_prompt,
-            size="1024x1024",  # Standard size, will be resized as needed
-            quality="standard",
-            n=1
-        )
-        
-        # Download the generated image
-        image_url = response.data[0].url
-        image_response = requests.get(image_url, timeout=30)
-        
-        if image_response.status_code == 200:
-            logger.info("Successfully generated AI background image")
-            return image_response.content
-        else:
-            logger.error(f"Failed to download AI generated image: {image_response.status_code}")
-            return None
+        # Try gpt-image-1 first
+        try:
+            logger.info("Attempting background generation with gpt-image-1")
+            response = client.images.generate(
+                model="gpt-image-1",
+                prompt=background_prompt,
+                size="1024x1024",
+                n=1
+            )
+            
+            # Extract image bytes (Base64 for gpt-image-1, URL for DALL-E)
+            img_bytes = _extract_image_bytes(response.data[0])
+            logger.info("Successfully generated AI background image using gpt-image-1")
+            return img_bytes
+            
+        except Exception as gpt_image_error:
+            logger.warning(f"gpt-image-1 failed: {gpt_image_error}, falling back to DALL-E-3")
+            
+            # Fallback to DALL-E-3
+            try:
+                response = client.images.generate(
+                    model="dall-e-3",
+                    prompt=background_prompt,
+                    size="1024x1024",  # Standard size, will be resized as needed
+                    quality="standard",
+                    n=1
+                )
+                
+                # Download the generated image (DALL-E uses URLs)
+                image_url = response.data[0].url
+                image_response = requests.get(image_url, timeout=30)
+                
+                if image_response.status_code == 200:
+                    logger.info("Successfully generated AI background image using DALL-E-3 fallback")
+                    return image_response.content
+                else:
+                    logger.error(f"Failed to download DALL-E generated image: {image_response.status_code}")
+                    return None
+                    
+            except Exception as dalle_error:
+                logger.error(f"Both gpt-image-1 and DALL-E-3 failed: {dalle_error}")
+                return None
             
     except Exception as e:
         logger.warning(f"AI background generation failed: {e}")

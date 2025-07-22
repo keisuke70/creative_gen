@@ -69,11 +69,8 @@ def generate_copy_and_visual_prompts(
             }
         ]
         
-        results = []
-        
-        for variant in copy_variants:
-            # Enhanced prompt for both copy and contextual background generation
-            user_prompt = f"""Analyze this business content and create marketing copy + a detailed background image prompt:
+        # Single optimized prompt to generate ALL 5 variants in one call
+        user_prompt = f"""Analyze this business content and create 5 complete marketing copy variants with matching background prompts:
 
 BUSINESS CONTENT:
 - Title: {title}
@@ -81,70 +78,105 @@ BUSINESS CONTENT:
 - Page Content: {text_content[:800]}
 - Brand Context: {brand_context}
 
-TASK:
-1. Create {variant['type']} marketing copy following: {variant['instruction']}
-2. Analyze the business context to create a sophisticated background prompt
+CRITICAL: Each background prompt must be tailored to its specific copy message and the business type. Consider the product/service nature, target audience, and copy tone when creating background descriptions.
 
-COPY REQUIREMENTS:
-- Tone: {variant['tone']}
+TASK: Create ALL 5 variants in one response:
+
+1. BENEFIT variant: Focus on main value proposition. What problem does this solve? (clear and benefit-focused tone)
+2. URGENCY variant: Create urgency and immediate action. Use time-sensitive language. (urgent and action-driving tone)
+3. PROMO variant: Highlight deals, offers, promotional aspects. Sales-focused. (promotional and enticing tone)
+4. NEUTRAL variant: Straightforward, factual copy without hype. Clear information. (professional and informative tone)
+5. PLAYFUL variant: Friendly, approachable language that feels personal. (friendly and conversational tone)
+
+REQUIREMENTS FOR EACH:
 - Length: 1-2 sentences maximum
 - Banner-ready text for overlay
+- Include sophisticated background prompt based on business analysis
+- Background: 絶対に文字・ロゴ・テキスト・文章・記号を含めない（ABSOLUTELY NO text, logos, words, readable elements）
+- Background: 抽象的な大気的要素のみ（gradients, shapes, textures, atmospheric elements only）
+- Background: Must complement the specific copy message and tone
+- Professional marketing quality
 
-BACKGROUND PROMPT REQUIREMENTS:
-- Analyze the business industry, target audience, and brand personality from the content
-- {variant['bg_instruction']}
-- Consider the business type (B2B vs B2C, service vs product, industry vertical)
-- Create abstract background elements that subtly reflect the business context
-- Ensure text overlay readability
-- NO logos, text, or literal objects - only abstract atmospheric elements
-- Professional marketing material quality
+OUTPUT FORMAT (exactly):
+BENEFIT:
+COPY: [benefit copy here]
+BACKGROUND: 文字・ロゴ・テキストを一切含まない抽象的なマーケティングバナー背景を作成：[この特定のベネフィットコピーに合う色彩・雰囲気・ムードを詳しく描写、ビジネスタイプに合うビジュアルスタイル、純粋に抽象的な要素のみ]
 
-OUTPUT FORMAT:
-COPY: [your marketing copy here]
-BACKGROUND: Create an abstract background for marketing banner: [detailed background prompt based on business analysis]"""
+URGENCY:
+COPY: [urgency copy here] 
+BACKGROUND: 文字・ロゴ・テキストを一切含まない抽象的なマーケティングバナー背景を作成：[この特定の緊急性コピーに合うダイナミックな色彩・エネルギー・緊急感のある雰囲気を詳しく描写、視覚的緊張感、純粋に抽象的な要素のみ]
+
+PROMO:
+COPY: [promo copy here]
+BACKGROUND: 文字・ロゴ・テキストを一切含まない抽象的なマーケティングバナー背景を作成：[この特定のプロモーションコピーを強化する祝祭的な色彩・プロモーション雰囲気を詳しく描写、視覚的興奮感、純粋に抽象的な要素のみ]
+
+NEUTRAL:
+COPY: [neutral copy here]
+BACKGROUND: 文字・ロゴ・テキストを一切含まない抽象的なマーケティングバナー背景を作成：[この特定の情報的コピーをサポートするクリーンでプロフェッショナルな雰囲気を詳しく描写、ミニマルな視覚要素、純粋に抽象的な要素のみ]
+
+PLAYFUL:
+COPY: [playful copy here]
+BACKGROUND: 文字・ロゴ・テキストを一切含まない抽象的なマーケティングバナー背景を作成：[この特定のフレンドリーなコピーに合う温かく親しみやすい雰囲気を詳しく描写、親しみやすいビジュアルスタイル、純粋に抽象的な要素のみ]"""
+        
+        # Single LLM call instead of loop
+        models_to_try = ["gpt-4.1-mini", "gpt-4.1", "gpt-4.1-nano", "gpt-4o-mini"]
+        
+        response = None
+        for model in models_to_try:
+            try:
+                response = client.chat.completions.create(
+                    model=model,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt}
+                    ],
+                )
+                print(f"Copy generation successful with model: {model}")
+                break
+            except Exception as model_error:
+                print(f"Model {model} failed: {model_error}")
+                continue
+        
+        results = []
+        
+        if response is None:
+            print("All models failed, using fallback copy")
+            return generate_fallback_copy_with_prompts(text_content, title)
+        
+        # Parse the single response containing all 5 variants
+        response_text = response.choices[0].message.content.strip()
+        
+        # Parse all variants from single response
+        for variant in copy_variants:
+            variant_type = variant["type"].upper()
             
-            # Try GPT-4.1-mini first, then fallback to other models (May 2025 models)
-            models_to_try = ["gpt-4.1-mini", "gpt-4.1", "gpt-4.1-nano", "gpt-4o-mini"]
+            # Extract copy and background for this variant
+            copy_text = ""
+            background_prompt = ""
             
-            response = None
-            for model in models_to_try:
-                try:
-                    response = client.chat.completions.create(
-                        model=model,
-                        messages=[
-                            {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": user_prompt}
-                        ],
-                    )
-                    print(f"Copy generation successful with model: {model}")
-                    break
-                except Exception as model_error:
-                    print(f"Model {model} failed: {model_error}")
+            # Find the section for this variant
+            lines = response_text.split('\n')
+            in_variant_section = False
+            
+            for line in lines:
+                if line.startswith(f'{variant_type}:'):
+                    in_variant_section = True
                     continue
-            
-            if response is None:
-                print(f"All models failed for {variant['type']}, using fallback copy")
-                copy_text = f"Discover {variant['type']} solutions today!"
-                background_prompt = f"Professional {variant['type']} background suitable for business marketing"
-            else:
-                response_text = response.choices[0].message.content.strip()
-                
-                # Parse the response
-                copy_text = ""
-                background_prompt = ""
-                
-                lines = response_text.split('\n')
-                for line in lines:
+                elif any(line.startswith(f'{other["type"].upper()}:') for other in copy_variants if other != variant):
+                    in_variant_section = False
+                    continue
+                    
+                if in_variant_section:
                     if line.startswith('COPY:'):
                         copy_text = line.replace('COPY:', '').strip()
                     elif line.startswith('BACKGROUND:'):
                         background_prompt = line.replace('BACKGROUND:', '').strip()
-                
-                # Fallback if parsing fails
-                if not copy_text:
-                    copy_text = response_text.split('\n')[0][:100]
-                if not background_prompt:
-                    background_prompt = f"Professional abstract background for {variant['type']} marketing message"
+            
+            # Fallback if parsing fails for this variant
+            if not copy_text:
+                copy_text = f"Discover {variant['type']} solutions today!"
+            if not background_prompt:
+                background_prompt = f"文字・ロゴ・テキストを一切含まない抽象的な{variant['type']}マーケティング背景：{variant['tone']}メッセージトーンに合うプロフェッショナルな大気デザイン、純粋に抽象的な要素のみ"
             
             results.append({
                 "type": variant["type"],
@@ -173,7 +205,7 @@ def generate_fallback_copy_with_prompts(text_content: str, title: str = "") -> L
             "text": f"Discover the power of {base_title.lower()}. Get results fast.",
             "tone": "benefit-focused",
             "char_count": 0,
-            "background_prompt": "clean, modern, professional environment emphasizing quality and reliability",
+            "background_prompt": "文字・ロゴ・テキストを一切含まない抽象的なプロフェッショナル背景：柔らかなブルーとグレーのトーンでクリーンでモダンなグラデーション、控えめな幾何学的形状、信頼と品質を強調する純粋に抽象的な要素のみ",
             "visual_theme": "professional"
         },
         {
@@ -181,7 +213,7 @@ def generate_fallback_copy_with_prompts(text_content: str, title: str = "") -> L
             "text": "Limited time offer. Act now before it's too late!",
             "tone": "urgent",
             "char_count": 0,
-            "background_prompt": "dynamic, energetic background with motion elements and vibrant colors",
+            "background_prompt": "文字・ロゴ・テキストを一切含まない抽象的な緊急感背景：鮮やかなレッドとオレンジのグラデーションで動的なモーションブラー効果、斜めのエネルギーライン、視覚的緊張感と即座性を生み出す純粋に抽象的な要素のみ",
             "visual_theme": "dynamic"
         },
         {
@@ -189,7 +221,7 @@ def generate_fallback_copy_with_prompts(text_content: str, title: str = "") -> L
             "text": "Special launch pricing. Save big today only.",
             "tone": "promotional",
             "char_count": 0,
-            "background_prompt": "celebratory, eye-catching background with warm lighting and promotional feel",
+            "background_prompt": "文字・ロゴ・テキストを一切含まない抽象的なプロモーション背景：ゴールデンイエローと温かいオレンジでお祝いのバーストパターン、放射状の光効果、スパークル要素で祝祭的な雰囲気の純粋に抽象的な要素のみ",
             "visual_theme": "celebratory"
         }
     ]

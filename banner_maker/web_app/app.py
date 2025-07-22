@@ -9,7 +9,7 @@ import uuid
 import asyncio
 import logging
 import time
-from flask import Flask, render_template, request, jsonify, send_file, url_for
+from flask import Flask, render_template, request, jsonify, send_file, send_from_directory, url_for
 from werkzeug.utils import secure_filename
 import threading
 from typing import Dict, Optional
@@ -27,6 +27,7 @@ from src.lp_scrape import scrape_landing_page, get_page_title_and_description
 from src.gpt_image import generate_unified_creative
 from src.copy_gen import generate_copy_and_visual_prompts, select_best_copy_for_banner
 from src.canva_oauth import init_canva_oauth, get_authenticated_api, require_canva_auth
+from src.explanation_gen import generate_creative_explanation
 import requests
 from urllib.parse import urljoin, urlparse
 import re
@@ -147,6 +148,12 @@ def index():
     return render_template('index.html')
 
 
+@app.route('/uploads/<filename>')
+def uploaded_file(filename):
+    """Serve uploaded files"""
+    return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
+
+
 @app.route('/debug/routes')
 def debug_routes():
     """Debug route to show all registered routes"""
@@ -164,16 +171,23 @@ def debug_routes():
 @require_canva_auth
 def generate_banner():
     """Generate banner using Canva pipeline"""
+    import time
+    start_time = time.time()
+    logger.info("🚀 Starting Canva banner generation")
+    
     try:
         from src.layout_orchestrator import build_banner, AdSize, Product, CopyTriple
-        from src.background_gen import maybe_generate_background
         
         data = request.get_json()
         product_id = data.get('product_id')  # For database lookup
         url = data.get('url')  # Fallback for direct URL processing
         size_key = data.get('size', 'MD_RECT')
         variant_idx = data.get('variant_idx', 0)
-        product_image_path = data.get('product_image_path')
+        product_image_paths = data.get('product_image_paths', [])
+        
+        # Backward compatibility for single image
+        if not product_image_paths and data.get('product_image_path'):
+            product_image_paths = [data.get('product_image_path')]
         
         # Validate ad size
         if size_key not in AdSize.__members__:
@@ -200,35 +214,55 @@ def generate_banner():
             cta='Learn More'
         )
         
+        # Create design title from selected copy
+        design_title = f"Marketing Banner - {selected_copy.get('type', 'banner').title()}"
+        
         # Get authenticated Canva API instance
+        auth_time = time.time()
         api = get_authenticated_api()
         if not api:
             return jsonify({'error': 'Canva authentication required'}), 401
+        logger.info(f"⚡ Auth check: {(time.time() - auth_time)*1000:.1f}ms")
         
-        # Upload product image to Canva if provided
-        hero_asset_id = None
-        if product_image_path and os.path.exists(product_image_path):
-            try:
-                with open(product_image_path, 'rb') as f:
-                    image_data = f.read()
-                
-                # Determine MIME type
-                import mimetypes
-                mime_type, _ = mimetypes.guess_type(product_image_path)
-                if not mime_type or not mime_type.startswith('image/'):
-                    mime_type = 'image/jpeg'
-                
-                hero_asset_id = api.upload_binary(
-                    image_data,
-                    os.path.basename(product_image_path),
-                    mime_type
-                )
-                logger.info(f"Successfully uploaded image as asset: {hero_asset_id}")
-                
-            except Exception as e:
-                logger.warning(f"Asset upload failed: {e}")
-                logger.info("Continuing with text-only banner generation")
-                # Continue with hero_asset_id = None for text-only banner
+        # Upload product images to Canva if provided
+        hero_asset_ids = []
+        if product_image_paths:
+            upload_start = time.time()
+            logger.info(f"📤 Starting upload of {len(product_image_paths)} product image(s)")
+            
+            for i, product_image_path in enumerate(product_image_paths):
+                if os.path.exists(product_image_path):
+                    try:
+                        with open(product_image_path, 'rb') as f:
+                            image_data = f.read()
+                        
+                        # Determine MIME type
+                        import mimetypes
+                        mime_type, _ = mimetypes.guess_type(product_image_path)
+                        if not mime_type or not mime_type.startswith('image/'):
+                            mime_type = 'image/jpeg'
+                        
+                        logger.info(f"📤 Uploading product image {i+1}/{len(product_image_paths)} ({len(image_data)} bytes)")
+                        asset_id = api.upload_binary(
+                            image_data,
+                            os.path.basename(product_image_path),
+                            mime_type
+                        )
+                        hero_asset_ids.append(asset_id)
+                        logger.info(f"✅ Product image {i+1} uploaded: {asset_id}")
+                        
+                    except Exception as e:
+                        logger.error(f"❌ Failed to upload product image {i+1}: {str(e)}")
+                        # Continue with other images
+                        continue
+                else:
+                    logger.warning(f"⚠️ Product image {i+1} not found: {product_image_path}")
+            
+            upload_time = (time.time() - upload_start) * 1000
+            logger.info(f"✅ Uploaded {len(hero_asset_ids)}/{len(product_image_paths)} product images ({upload_time:.1f}ms)")
+        
+        # Use first uploaded image as primary hero asset for compatibility
+        hero_asset_id = hero_asset_ids[0] if hero_asset_ids else None
         
         # Note: We no longer require the product image - can create text-only banners
         
@@ -242,9 +276,34 @@ def generate_banner():
         bg_asset_id = data.get('background_asset_id')
         if not bg_asset_id:
             logger.warning("No background asset ID provided, proceeding without background")
+        else:
+            logger.info(f"🎨 Using pre-generated background: {bg_asset_id}")
         
-        # Build banner with authenticated API
-        result = build_banner(product, ad_size, copy, bg_asset_id, api, url)
+        # Use simplified upload instead of complex banner building
+        # This avoids the failing element addition and export timeout issues
+        from src.simple_canva_upload import simple_canva_upload
+        
+        build_start = time.time()
+        logger.info(f"🏗️  Using simplified Canva upload (bg_asset: {bg_asset_id}, hero_asset: {hero_asset_id})")
+        
+        simple_result = simple_canva_upload(
+            product_image_paths=product_image_paths,
+            hero_asset_ids=hero_asset_ids,
+            background_asset_id=bg_asset_id,
+            api=api,
+            design_title=design_title or f"Marketing Banner {ad_size.value}"
+        )
+        
+        build_time = (time.time() - build_start) * 1000
+        logger.info(f"✅ Simplified upload completed ({build_time:.1f}ms): design_id={simple_result.design_id}")
+        
+        # Convert to compatible result format
+        from src.layout_orchestrator import BannerResult
+        result = BannerResult(
+            design_id=simple_result.design_id,
+            export_url=simple_result.design_url,  # Use edit URL instead of export
+            html_snippet=f'<p>Assets uploaded to Canva. <a href="{simple_result.design_url}" target="_blank">Open in Canva</a> to arrange them.</p>'
+        )
         
         # Import template map for dimensions
         from src.templates import TEMPLATE_MAP
@@ -261,12 +320,19 @@ def generate_banner():
             'dimensions': f"{TEMPLATE_MAP[ad_size].canvas_w}x{TEMPLATE_MAP[ad_size].canvas_h}"
         }
         
+        # Log total time
+        total_time = (time.time() - start_time) * 1000
+        logger.info(f"🎉 Total Canva generation time: {total_time:.1f}ms")
+        
+        # Return completed result immediately (no polling needed)
+        # Frontend will handle this directly instead of polling for status
         return jsonify({
             'session_id': session_id,
             'design_id': result.design_id,
             'export_url': result.export_url,
             'html': result.html_snippet,
-            'status': 'completed'
+            'status': 'completed',
+            'generation_time_ms': round(total_time, 1)
         })
         
     except Exception as e:
@@ -405,7 +471,8 @@ def proxy_image():
             return jsonify({
                 'success': True,
                 'filepath': filepath,
-                'filename': unique_filename
+                'filename': unique_filename,
+                'is_extracted_image': True  # Mark as extracted image for cleanup
             })
             
         except Exception as e:
@@ -643,6 +710,10 @@ def generate_copy_variants():
         if not url:
             return jsonify({'error': 'URL is required'}), 400
         
+        # Initialize variables
+        lp_data = None
+        page_meta = None
+        
         # Get page data - scrape if not available
         cached_page_data = get_cached_scraping_data(url)
         if not cached_page_data:
@@ -681,11 +752,15 @@ def generate_copy_variants():
             lp_data = cached_page_data['lp_data']
             page_meta = cached_page_data['page_meta']
         
+        # Verify that we have the required data
+        if not lp_data or not page_meta:
+            return jsonify({'error': 'Failed to retrieve page data'}), 500
+        
         # Generate 5 copy variants from scraped data
         copy_variants = generate_copy_and_visual_prompts(
-            text_content=lp_data['text_content'],
-            title=page_meta['title'],
-            description=page_meta['description']
+            text_content=lp_data.get('text_content', ''),
+            title=page_meta.get('title', ''),
+            description=page_meta.get('description', '')
         )
         
         # Don't cache automatically - let user select first
@@ -741,6 +816,7 @@ def generate_background():
         data = request.get_json()
         url = data.get('url')
         selected_copy = data.get('selected_copy')
+        custom_background_prompt = data.get('custom_background_prompt')  # User-edited prompt
         
         if not url or not selected_copy:
             return jsonify({'error': 'URL and selected copy are required'}), 400
@@ -750,14 +826,18 @@ def generate_background():
         if not api:
             return jsonify({'error': 'Canva authentication required'}), 401
         
-        # Create copy content dictionary with the stored background prompt
+        # Create copy content dictionary with custom or stored background prompt
+        background_prompt = custom_background_prompt or selected_copy.get('background_prompt', '')
+        
         copy_content = {
             'headline': selected_copy.get('text', '').split('\n')[0][:50],
             'text': selected_copy.get('text', ''),
             'type': selected_copy.get('type', 'neutral'),
             'tone': selected_copy.get('tone', 'professional'),
-            'background_prompt': selected_copy.get('background_prompt', '')  # This is the key enhancement
+            'background_prompt': background_prompt  # Use custom prompt if provided
         }
+        
+        logger.info(f"🎨 Using background prompt: {background_prompt[:100]}...")
         
         # Create simple product for fallback gradient generation
         from src.layout_orchestrator import Product
@@ -767,16 +847,23 @@ def generate_background():
         )
         
         # Generate AI background using the stored prompt
-        logger.info("Generating AI background using LLM-generated prompt from copy generation")
+        bg_gen_start = time.time()
+        logger.info("🎨 Generating AI background using LLM-generated prompt from copy generation")
         ai_background_data = generate_ai_background_with_stored_prompt(copy_content, product)
+        bg_gen_time = (time.time() - bg_gen_start) * 1000
+        logger.info(f"✅ AI background generated ({bg_gen_time:.1f}ms)")
         
         if ai_background_data:
             # Upload to Canva
+            bg_upload_start = time.time()
+            logger.info(f"📤 Starting background upload to Canva ({len(ai_background_data)} bytes)")
             asset_id = api.upload_binary(
                 ai_background_data,
                 "ai_background.png",
                 "image/png"
             )
+            bg_upload_time = (time.time() - bg_upload_start) * 1000
+            logger.info(f"✅ Background uploaded to Canva: {asset_id} ({bg_upload_time:.1f}ms)")
             
             logger.info(f"Generated AI background asset: {asset_id}")
             
@@ -795,6 +882,64 @@ def generate_background():
         
     except Exception as e:
         logger.error(f"Background generation error: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/generate-explanation', methods=['POST'])
+def generate_explanation():
+    """Generate creative explanation and insights"""
+    try:
+        data = request.get_json()
+        url = data.get('url')
+        
+        if not url:
+            return jsonify({'error': 'URL is required'}), 400
+        
+        # Get page data - scrape if not available
+        cached_page_data = get_cached_scraping_data(url)
+        if not cached_page_data:
+            # Auto-scrape the page
+            import asyncio
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
+            lp_data = loop.run_until_complete(scrape_landing_page(url))
+            page_meta = loop.run_until_complete(get_page_title_and_description(url))
+            
+            # Cache the scraping results
+            cache_scraping_data(url, lp_data, page_meta)
+            
+            loop.close()
+        else:
+            lp_data = cached_page_data['lp_data']
+            page_meta = cached_page_data['page_meta']
+        
+        # Generate creative explanation using the enhanced scraping data
+        explanation = generate_creative_explanation(
+            text_content=lp_data['text_content'],
+            title=page_meta['title'],
+            description=page_meta['description'],
+            url=url
+        )
+        
+        # Cache the explanation
+        if url not in scraping_cache:
+            scraping_cache[url] = {}
+        
+        scraping_cache[url].update({
+            'explanation': explanation,
+            'explanation_timestamp': time.time()
+        })
+        
+        return jsonify({
+            'success': True,
+            'explanation': explanation,
+            'page_title': page_meta['title'],
+            'page_description': page_meta['description']
+        })
+        
+    except Exception as e:
+        logger.error(f"Explanation generation error: {e}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
 
@@ -1135,6 +1280,55 @@ def cleanup_uploaded_image():
             return jsonify({'success': True, 'message': 'Image already cleaned up'})
             
     except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/add-background-to-design', methods=['POST'])
+@require_canva_auth
+def add_background_to_design():
+    """Add background image to existing Canva design"""
+    try:
+        data = request.get_json()
+        design_id = data.get('design_id')
+        background_asset_id = data.get('background_asset_id')
+        
+        if not design_id:
+            return jsonify({'error': 'Design ID is required'}), 400
+            
+        if not background_asset_id:
+            return jsonify({'error': 'Background asset ID is required'}), 400
+        
+        # Get authenticated Canva API instance
+        api = get_authenticated_api()
+        if not api:
+            return jsonify({'error': 'Canva authentication required'}), 401
+        
+        logger.info(f"Adding background {background_asset_id} to existing design {design_id}")
+        
+        # Import Canva client for element creation
+        from src.simple_canva_upload import add_background_to_existing_design
+        
+        # Add background to the existing design
+        result = add_background_to_existing_design(
+            design_id=design_id,
+            background_asset_id=background_asset_id,
+            api=api
+        )
+        
+        if result.success:
+            logger.info(f"✅ Background added to design {design_id} successfully")
+            return jsonify({
+                'success': True,
+                'design_id': design_id,
+                'design_url': result.design_url,
+                'message': 'Background added to design successfully'
+            })
+        else:
+            logger.error(f"❌ Failed to add background to design: {result.error}")
+            return jsonify({'error': result.error}), 500
+            
+    except Exception as e:
+        logger.error(f"Error adding background to design: {e}")
         return jsonify({'error': str(e)}), 500
 
 

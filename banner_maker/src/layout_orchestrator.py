@@ -88,7 +88,9 @@ def build_banner(
         if not api:
             raise CanvaAPIError("No authenticated Canva API available")
     
-    logger.info(f"Building {ad_size.value} banner ({template.canvas_w}x{template.canvas_h})")
+    import time
+    build_start = time.time()
+    logger.info(f"🏗️  Building {ad_size.value} banner ({template.canvas_w}x{template.canvas_h})")
     
     # Generate meaningful design title from URL
     design_title = None
@@ -99,7 +101,11 @@ def build_banner(
         logger.info(f"Generated design title: {design_title}")
     
     # Step 1: Create design by duplicating template 
+    create_start = time.time()
+    logger.info(f"📋 Creating Canva design from template: {template.template_design_id}")
     design_id = api.create_design(template.canvas_w, template.canvas_h, template.template_design_id, design_title)
+    create_time = (time.time() - create_start) * 1000
+    logger.info(f"✅ Canva design created: {design_id} ({create_time:.1f}ms)")
     
     # Step 2: Build elements list
     elements = []
@@ -167,12 +173,17 @@ def build_banner(
         logger.info("No elements to add (creating blank template)")
     
     # Step 4: Export design
+    export_start = time.time()
+    logger.info(f"🖼️  Exporting design {design_id} as PNG")
     export_url = api.export_design(design_id, "png")
+    export_time = (time.time() - export_start) * 1000
+    logger.info(f"✅ Design exported successfully ({export_time:.1f}ms): {export_url}")
     
     # Step 5: Generate HTML snippet
     html_snippet = _generate_html_snippet(copy, template, ad_size, export_url)
     
-    logger.info(f"Banner generation completed: {export_url}")
+    total_build_time = (time.time() - build_start) * 1000
+    logger.info(f"🎉 Banner build completed in {total_build_time:.1f}ms: {export_url}")
     
     return BannerResult(
         design_id=design_id,

@@ -75,6 +75,19 @@
                 max-height: 50vh !important;
             }
         }
+        
+        /* Additional styles for image management */
+        .image-item {
+            position: relative;
+        }
+        
+        .remove-single-image {
+            transition: all 0.2s ease;
+        }
+        
+        .remove-single-image:hover {
+            transform: scale(1.1);
+        }
     </style>
 </head>
 <body class="bg-gray-100 min-h-screen">
@@ -195,6 +208,10 @@
                                     class="px-4 py-3 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
                                 <i class="fas fa-pen-fancy mr-2"></i>Generate Copy
                             </button>
+                            <button type="button" id="generateExplanationBtn" 
+                                    class="px-4 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                                <i class="fas fa-lightbulb mr-2"></i>Generate Explanation
+                            </button>
                         </div>
                         <p class="text-sm text-gray-500 mt-1">We'll extract content and images from this page</p>
                     </div>
@@ -202,23 +219,30 @@
                     <!-- Product Image Upload (Optional) -->
                     <div>
                         <label for="productImage" class="block text-sm font-medium text-gray-700 mb-2">
-                            <i class="fas fa-image mr-2"></i>Product Image (Optional)
+                            <i class="fas fa-images mr-2"></i>Product Images (Optional)
                         </label>
                         <div class="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:border-blue-400 transition-colors">
-                            <input type="file" id="productImage" name="productImage" accept="image/*" class="hidden">
+                            <input type="file" id="productImage" name="productImage" accept="image/*" multiple class="hidden">
                             <div id="uploadArea" class="cursor-pointer">
                                 <i class="fas fa-cloud-upload-alt text-4xl text-gray-400 mb-3"></i>
-                                <p class="text-gray-600">Click to upload or drag and drop</p>
-                                <p class="text-sm text-gray-500 mt-1">PNG, JPG, JPEG up to 16MB</p>
+                                <p class="text-gray-600">Click to upload or drag and drop multiple images</p>
+                                <p class="text-sm text-gray-500 mt-1">PNG, JPG, JPEG up to 16MB each</p>
                                 <p class="text-xs text-blue-500 mt-1">💡 Or drag images from "Extracted Images" below</p>
                             </div>
                             <div id="uploadPreview" class="hidden mt-4">
-                                <img id="previewImage" class="max-w-32 max-h-32 mx-auto rounded-lg">
-                                <p id="uploadedFileName" class="text-sm text-gray-600 mt-2"></p>
-                                <button type="button" id="removeImage" class="text-red-500 text-sm mt-1 hover:underline">Remove</button>
+                                <div class="text-sm text-gray-600 mb-3">
+                                    <i class="fas fa-check-circle text-green-500 mr-1"></i>
+                                    <span id="uploadedCount">0</span> image(s) uploaded
+                                </div>
+                                <div id="uploadedImagesGrid" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 max-h-64 overflow-y-auto">
+                                    <!-- Uploaded images will be displayed here -->
+                                </div>
+                                <button type="button" id="clearAllImages" class="text-red-500 text-sm mt-3 hover:underline">
+                                    <i class="fas fa-trash mr-1"></i>Clear All Images
+                                </button>
                             </div>
                         </div>
-                        <p class="text-sm text-gray-500 mt-1">Upload your product image for better results, or we'll find one automatically</p>
+                        <p class="text-sm text-gray-500 mt-1">Upload your product images for better results, or we'll find one automatically</p>
                     </div>
 
                     <!-- Extracted Images Section -->
@@ -260,31 +284,79 @@
                         </div>
                     </div>
 
-                    <!-- Background Generation Section -->
-                    <div id="backgroundSection" class="hidden">
+                    <!-- Creative Explanation Section -->
+                    <div id="explanationSection" class="hidden">
                         <label class="block text-sm font-medium text-gray-700 mb-2">
-                            <i class="fas fa-image mr-2"></i>AI Background Generation
+                            <i class="fas fa-lightbulb mr-2"></i>Creative Explanation & Insights
                         </label>
                         <div class="border border-gray-200 rounded-lg p-4">
                             <div class="mb-4">
-                                <p class="text-sm text-gray-600 mb-3">Generate an AI background that matches your copy:</p>
+                                <p class="text-sm text-gray-600 mb-3">AI-generated insights to help you create more effective advertising creatives:</p>
+                            </div>
+                            
+                            <!-- Explanation Content -->
+                            <div id="explanationContent" class="space-y-4">
+                                <!-- Content will be populated here -->
+                            </div>
+                            
+                            <div class="mt-4 flex justify-between items-center">
+                                <div class="text-sm text-gray-500">
+                                    <span id="explanationIndicator" class="text-green-600 font-medium hidden">
+                                        <i class="fas fa-check-circle mr-1"></i>Explanation generated
+                                    </span>
+                                </div>
+                                <button type="button" id="regenerateExplanationBtn" 
+                                        class="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors text-sm hidden">
+                                    <i class="fas fa-redo mr-2"></i>Regenerate Explanation
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Background Generation Section -->
+                    <div id="backgroundSection" class="hidden">
+                        <label class="block text-sm font-medium text-gray-700 mb-2">
+                            <i class="fas fa-image mr-2"></i>AI Background Generation (Optional)
+                        </label>
+                        <div class="border border-gray-200 rounded-lg p-4">
+                            <div class="mb-4">
+                                <p class="text-sm text-gray-600 mb-3">Optional: Generate an AI background that matches your copy, or use "Send to Canva" below to proceed with Canva's backgrounds:</p>
+                            </div>
+                            
+                            <!-- Background Prompt Section -->
+                            <div id="backgroundPromptSection" class="mb-4">
+                                <label class="block text-sm font-medium text-gray-700 mb-2">
+                                    <i class="fas fa-edit mr-2"></i>Background Prompt
+                                </label>
+                                <textarea id="backgroundPromptText" 
+                                          class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm" 
+                                          rows="3" 
+                                          placeholder="AI background generation prompt will appear here...">
+                                </textarea>
+                                <p class="text-xs text-gray-500 mt-1">Edit this prompt to customize your background generation</p>
                             </div>
                             
                             <div id="backgroundStatusDisplay" class="w-full px-4 py-3 border border-gray-300 rounded-lg bg-gray-50 mb-4">
                                 <span class="text-gray-500">
                                     <i class="fas fa-info-circle mr-2"></i>
-                                    Select copy first to enable background generation
+                                    Select copy first to see background prompt
                                 </span>
                             </div>
                             
                             <div class="flex justify-between items-center">
-                                <button type="button" id="generateBackgroundBtn" disabled
-                                        class="bg-gradient-to-r from-gray-400 to-gray-500 text-white px-6 py-3 rounded-lg font-semibold shadow-lg disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200">
-                                    <i class="fas fa-palette mr-2"></i>Generate AI Background
-                                </button>
+                                <div class="flex space-x-3">
+                                    <button type="button" id="generateBackgroundBtn" disabled
+                                            class="bg-gradient-to-r from-gray-400 to-gray-500 text-white px-6 py-3 rounded-lg font-semibold shadow-lg disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200">
+                                        <i class="fas fa-palette mr-2"></i>Generate AI Background
+                                    </button>
+                                </div>
                                 
                                 <div id="backgroundPreview" class="hidden">
                                     <img class="w-20 h-20 object-cover rounded-lg border" alt="Generated background preview">
+                                    <button type="button" id="sendBackgroundBtn" 
+                                            class="mt-2 bg-gradient-to-r from-indigo-500 to-purple-600 text-white px-4 py-2 rounded-lg font-semibold text-sm shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-200">
+                                        <i class="fas fa-upload mr-2"></i>Send Background to Canva
+                                    </button>
                                 </div>
                             </div>
                         </div>
@@ -332,7 +404,7 @@
                             <i class="fas fa-upload mr-2"></i>
                             Send to Canva
                         </button>
-                        <p class="text-sm text-gray-500 mt-2">Generate copy and background first to enable Canva upload</p>
+                        <p class="text-sm text-gray-500 mt-2">Generate and select copy first. Explanation and background generation are optional.</p>
                     </div>
                     
                 </form>

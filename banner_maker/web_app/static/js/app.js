@@ -3,13 +3,14 @@
 class BannerMaker {
     constructor() {
         this.currentSessionId = null;
-        this.uploadedImagePath = null;
+        this.uploadedImages = []; // Array to store multiple uploaded images: [{path: string, isExtracted: boolean, id: string}]
         this.pollInterval = null;
         this.currentUrl = null;
         this.currentTempImage = null; // Track temp images for cleanup
         this.selectedCopy = null; // Track selected copy
         this.copyVariants = []; // Store generated copy variants
         this.generatedBackgroundId = null; // Track generated background asset ID
+        this.extractedImagePaths = []; // Track extracted images for cleanup after Canva upload
         
         this.initializeEventListeners();
     }
@@ -25,6 +26,34 @@ class BannerMaker {
             }
         } else {
             console.warn(`Element with id '${elementId}' not found`);
+        }
+    }
+
+    // Helper function to copy text to clipboard
+    async copyToClipboard(text, description = 'text') {
+        try {
+            await navigator.clipboard.writeText(text);
+            this.showSuccessMessage(`📋 ${description.charAt(0).toUpperCase() + description.slice(1)} copied to clipboard!`);
+            console.log(`Successfully copied ${description} to clipboard:`, text);
+        } catch (err) {
+            // Fallback for older browsers
+            try {
+                const textArea = document.createElement('textarea');
+                textArea.value = text;
+                textArea.style.position = 'fixed';
+                textArea.style.left = '-999999px';
+                textArea.style.top = '-999999px';
+                document.body.appendChild(textArea);
+                textArea.focus();
+                textArea.select();
+                document.execCommand('copy');
+                document.body.removeChild(textArea);
+                this.showSuccessMessage(`📋 ${description.charAt(0).toUpperCase() + description.slice(1)} copied to clipboard!`);
+                console.log(`Successfully copied ${description} to clipboard (fallback):`, text);
+            } catch (fallbackErr) {
+                console.error('Failed to copy to clipboard:', fallbackErr);
+                this.showError(`Failed to copy ${description} to clipboard. Please copy manually.`);
+            }
         }
     }
 
@@ -98,11 +127,28 @@ class BannerMaker {
             console.error('Generate Copy button not found!');
         }
 
+        // Generate explanation button
+        const generateExplanationBtn = document.getElementById('generateExplanationBtn');
+        if (generateExplanationBtn) {
+            generateExplanationBtn.addEventListener('click', () => {
+                console.log('Generate Explanation button clicked');
+                this.generateExplanation();
+            });
+        }
+
         // Regenerate copy button
         const regenerateCopyBtn = document.getElementById('regenerateCopyBtn');
         if (regenerateCopyBtn) {
             regenerateCopyBtn.addEventListener('click', () => {
                 this.generateCopy();
+            });
+        }
+
+        // Regenerate explanation button
+        const regenerateExplanationBtn = document.getElementById('regenerateExplanationBtn');
+        if (regenerateExplanationBtn) {
+            regenerateExplanationBtn.addEventListener('click', () => {
+                this.generateExplanation();
             });
         }
 
@@ -113,12 +159,22 @@ class BannerMaker {
                 this.generateBackground();
             });
         }
+        
+        // Skip background button
 
         // Regenerate background button
         const regenerateBackgroundBtn = document.getElementById('regenerateBackgroundBtn');
         if (regenerateBackgroundBtn) {
             regenerateBackgroundBtn.addEventListener('click', () => {
                 this.generateBackground();
+            });
+        }
+        
+        // Send background to existing Canva design button
+        const sendBackgroundBtn = document.getElementById('sendBackgroundBtn');
+        if (sendBackgroundBtn) {
+            sendBackgroundBtn.addEventListener('click', () => {
+                this.sendBackgroundToCanva();
             });
         }
 
@@ -136,6 +192,7 @@ class BannerMaker {
 
     initializeFileUpload() {
         const uploadArea = document.getElementById('uploadArea');
+        const uploadPreview = document.getElementById('uploadPreview');
         const fileInput = document.getElementById('productImage');
         const removeButton = document.getElementById('removeImage');
 
@@ -144,49 +201,63 @@ class BannerMaker {
             fileInput.click();
         });
 
-        // Drag and drop for files and extracted images
-        uploadArea.addEventListener('dragover', (e) => {
-            e.preventDefault();
-            uploadArea.classList.add('drop-zone-active');
-        });
+        // Function to handle drag and drop events
+        const addDragDropEvents = (element) => {
+            element.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                element.classList.add('drop-zone-active');
+            });
 
-        uploadArea.addEventListener('dragleave', () => {
-            uploadArea.classList.remove('drop-zone-active');
-        });
+            element.addEventListener('dragleave', () => {
+                element.classList.remove('drop-zone-active');
+            });
 
-        uploadArea.addEventListener('drop', (e) => {
-            e.preventDefault();
-            uploadArea.classList.remove('drop-zone-active');
-            
-            // Check if it's an extracted image (JSON data)
-            const imageData = e.dataTransfer.getData('text/plain');
-            if (imageData) {
-                try {
-                    const image = JSON.parse(imageData);
-                    this.handleExtractedImageDrop(image);
-                    return;
-                } catch (e) {
-                    // Not JSON, continue with file handling
+            element.addEventListener('drop', (e) => {
+                e.preventDefault();
+                element.classList.remove('drop-zone-active');
+                
+                // Check if it's an extracted image (JSON data)
+                const imageData = e.dataTransfer.getData('text/plain');
+                
+                if (imageData && imageData.trim().length > 0) {
+                    try {
+                        const image = JSON.parse(imageData);
+                        // Additional validation to ensure it's actually an extracted image object
+                        if (image && typeof image === 'object' && image.src) {
+                            console.log('Handling extracted image drop:', image.src);
+                            this.handleExtractedImageDrop(image);
+                            return;
+                        }
+                    } catch (e) {
+                        // Not JSON, continue with file handling
+                        console.log('Failed to parse as JSON, treating as file drop');
+                    }
                 }
-            }
-            
-            // Handle file drop
-            const files = e.dataTransfer.files;
-            if (files.length > 0) {
-                this.handleFileUpload(files[0]);
-            }
-        });
+                
+                // Handle file drop - support multiple files
+                const files = e.dataTransfer.files;
+                if (files.length > 0) {
+                    console.log('Handling file drop:', files.length, 'files');
+                    this.handleMultipleFileUpload(Array.from(files));
+                }
+            });
+        };
 
-        // File input change
+        // Add drag and drop events to both upload area and preview area
+        addDragDropEvents(uploadArea);
+        addDragDropEvents(uploadPreview);
+
+        // File input change - handle multiple files
         fileInput.addEventListener('change', (e) => {
             if (e.target.files.length > 0) {
-                this.handleFileUpload(e.target.files[0]);
+                this.handleMultipleFileUpload(Array.from(e.target.files));
             }
         });
 
-        // Remove image
-        removeButton.addEventListener('click', () => {
-            this.removeUploadedImage();
+        // Clear all images
+        const clearAllButton = document.getElementById('clearAllImages');
+        clearAllButton.addEventListener('click', () => {
+            this.clearAllImages();
         });
     }
 
@@ -232,6 +303,8 @@ class BannerMaker {
 
             if (result.success) {
                 this.uploadedImagePath = result.filepath;
+                // Regular file upload - not an extracted image, no cleanup needed
+                this.isExtractedImage = false;
             } else {
                 throw new Error(result.error || 'Upload failed');
             }
@@ -250,6 +323,7 @@ class BannerMaker {
         }
 
         this.uploadedImagePath = null;
+        this.isExtractedImage = false; // Reset extracted image flag
         document.getElementById('uploadArea').classList.remove('hidden');
         document.getElementById('uploadPreview').classList.add('hidden');
         document.getElementById('productImage').value = '';
@@ -281,11 +355,283 @@ class BannerMaker {
         return validTypes.includes(file.type);
     }
 
-    async generateBanner() {
-        await this.generateBannerWithOptions({});
+    async handleMultipleFileUpload(files) {
+        const validFiles = files.filter(file => this.isValidImageFile(file));
+        
+        if (validFiles.length === 0) {
+            this.showError('Please upload valid image files (PNG, JPG, JPEG, GIF, WebP)');
+            return;
+        }
+
+        // Check file sizes
+        const oversizedFiles = validFiles.filter(file => file.size > 16 * 1024 * 1024);
+        if (oversizedFiles.length > 0) {
+            this.showError(`${oversizedFiles.length} file(s) exceed 16MB limit`);
+            return;
+        }
+
+        try {
+            // Clean up previous uploads if they exist
+            await this.clearAllImages();
+
+            // Show immediate local previews for instant feedback
+            this.showImmediateLocalPreviews(validFiles);
+
+            // Upload files in parallel while showing progress
+            const uploadPromises = validFiles.map(async (file, index) => {
+                const tempId = `temp_${Date.now()}_${index}`;
+                
+                try {
+                    const formData = new FormData();
+                    formData.append('file', file);
+
+                    const response = await fetch('/api/upload', {
+                        method: 'POST',
+                        body: formData
+                    });
+
+                    const result = await response.json();
+
+                    if (result.success) {
+                        const imageData = {
+                            path: result.filepath,
+                            name: file.name,
+                            isExtracted: false,
+                            id: `uploaded_${Date.now()}_${index}`
+                        };
+                        
+                        this.uploadedImages.push(imageData);
+                        
+                        // Update individual preview immediately after upload
+                        this.updateSingleImagePreview(imageData, index);
+                        
+                        return imageData;
+                    } else {
+                        throw new Error(result.error || `Upload failed for ${file.name}`);
+                    }
+                } catch (error) {
+                    // Mark this preview as failed
+                    this.markPreviewAsFailed(index, error.message);
+                    throw error;
+                }
+            });
+
+            await Promise.all(uploadPromises);
+            
+            this.showSuccessMessage(`Successfully uploaded ${validFiles.length} image(s)`);
+
+        } catch (error) {
+            console.error('Multiple upload error:', error);
+            this.showError('Failed to upload some images: ' + error.message);
+            // Don't clear all images, just remove failed ones
+        }
     }
 
-    async generateBannerWithOptions(options = {}) {
+    showImmediateLocalPreviews(files) {
+        // Hide upload area and show preview immediately
+        document.getElementById('uploadArea').classList.add('hidden');
+        const uploadPreview = document.getElementById('uploadPreview');
+        uploadPreview.classList.remove('hidden');
+
+        // Update the count
+        document.getElementById('uploadedCount').textContent = files.length;
+
+        // Get the grid container
+        const uploadedImagesGrid = document.getElementById('uploadedImagesGrid');
+        
+        // Generate preview HTML with local file previews
+        uploadedImagesGrid.innerHTML = files.map((file, index) => {
+            const objectUrl = URL.createObjectURL(file);
+            return `
+                <div class="image-item relative" data-index="${index}">
+                    <div class="relative">
+                        <img src="${objectUrl}" 
+                             alt="${file.name}" 
+                             class="w-full h-24 object-cover rounded-lg border border-gray-300">
+                        <div class="absolute inset-0 bg-blue-500 bg-opacity-20 rounded-lg flex items-center justify-center">
+                            <div class="animate-spin rounded-full h-6 w-6 border-b-2 border-white"></div>
+                        </div>
+                    </div>
+                    <div class="mt-1 text-xs text-gray-600 truncate px-1" title="${file.name}">
+                        ${file.name}
+                    </div>
+                    <div class="text-xs text-blue-600 px-1">Uploading...</div>
+                </div>
+            `;
+        }).join('');
+    }
+
+    updateSingleImagePreview(imageData, index) {
+        const uploadedImagesGrid = document.getElementById('uploadedImagesGrid');
+        const imageItem = uploadedImagesGrid.querySelector(`[data-index="${index}"]`);
+        
+        if (imageItem) {
+            // Update the preview with uploaded image and remove loading state
+            imageItem.innerHTML = `
+                <img src="/uploads/${imageData.path.split('/').pop()}" 
+                     alt="${imageData.name}" 
+                     class="w-full h-24 object-cover rounded-lg border border-gray-300">
+                <div class="absolute top-1 right-1">
+                    <button type="button" 
+                            class="remove-single-image bg-red-500 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs hover:bg-red-600 transition-colors" 
+                            data-image-index="${this.uploadedImages.length - 1}"
+                            title="Remove ${imageData.name}">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                <div class="mt-1 text-xs text-gray-600 truncate px-1" title="${imageData.name}">
+                    ${imageData.name}
+                </div>
+                <div class="text-xs text-green-600 px-1">Uploaded ✓</div>
+            `;
+            
+            // Add event listener for remove button
+            const removeButton = imageItem.querySelector('.remove-single-image');
+            if (removeButton) {
+                removeButton.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const imageIndex = parseInt(e.target.closest('.remove-single-image').getAttribute('data-image-index'));
+                    this.removeSingleImage(imageIndex);
+                });
+            }
+            
+            // Set the first image as the primary one for backward compatibility
+            if (this.uploadedImages.length === 1) {
+                this.uploadedImagePath = imageData.path;
+            }
+        }
+    }
+
+    markPreviewAsFailed(index, errorMessage) {
+        const uploadedImagesGrid = document.getElementById('uploadedImagesGrid');
+        const imageItem = uploadedImagesGrid.querySelector(`[data-index="${index}"]`);
+        
+        if (imageItem) {
+            // Update the preview to show error state
+            const statusDiv = imageItem.querySelector('.text-xs:last-child');
+            if (statusDiv) {
+                statusDiv.textContent = 'Failed ✗';
+                statusDiv.className = 'text-xs text-red-600 px-1';
+            }
+            
+            // Remove loading overlay
+            const loadingOverlay = imageItem.querySelector('.absolute.inset-0');
+            if (loadingOverlay) {
+                loadingOverlay.remove();
+            }
+        }
+    }
+
+    async clearAllImages() {
+        // Clean up all uploaded images from server
+        const cleanupPromises = this.uploadedImages.map(imageData => 
+            this.cleanupUploadedImage(imageData.path)
+        );
+        
+        await Promise.all(cleanupPromises);
+
+        // Reset arrays and UI state
+        this.uploadedImages = [];
+        this.uploadedImagePath = null;
+        this.isExtractedImage = false;
+
+        // Reset UI to initial state
+        document.getElementById('uploadArea').classList.remove('hidden');
+        document.getElementById('uploadPreview').classList.add('hidden');
+        
+        // Clear the uploaded images grid
+        const uploadedImagesGrid = document.getElementById('uploadedImagesGrid');
+        if (uploadedImagesGrid) {
+            uploadedImagesGrid.innerHTML = '';
+        }
+        
+        // Reset the uploaded count
+        const uploadedCount = document.getElementById('uploadedCount');
+        if (uploadedCount) {
+            uploadedCount.textContent = '0';
+        }
+        
+        // Reset the file input
+        document.getElementById('productImage').value = '';
+
+        console.log('All images cleared');
+    }
+
+    updateMultipleImagePreview() {
+        if (this.uploadedImages.length === 0) return;
+
+        // Hide upload area and show preview
+        document.getElementById('uploadArea').classList.add('hidden');
+        const uploadPreview = document.getElementById('uploadPreview');
+        uploadPreview.classList.remove('hidden');
+
+        // Update the uploaded count
+        document.getElementById('uploadedCount').textContent = this.uploadedImages.length;
+
+        // Get the grid container
+        const uploadedImagesGrid = document.getElementById('uploadedImagesGrid');
+        
+        // Generate preview HTML for existing grid (this is used for single additions or refreshes)
+        uploadedImagesGrid.innerHTML = this.uploadedImages.map((imageData, index) => `
+            <div class="image-item relative" data-image-id="${imageData.id}">
+                <img src="/uploads/${imageData.path.split('/').pop()}" 
+                     alt="${imageData.name}" 
+                     class="w-full h-24 object-cover rounded-lg border border-gray-300">
+                <div class="absolute top-1 right-1">
+                    <button type="button" 
+                            class="remove-single-image bg-red-500 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs hover:bg-red-600 transition-colors" 
+                            data-index="${index}"
+                            title="Remove ${imageData.name}">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                <div class="mt-1 text-xs text-gray-600 truncate px-1" title="${imageData.name}">
+                    ${imageData.name}
+                </div>
+            </div>
+        `).join('');
+
+        // Add event listeners for individual remove buttons
+        uploadedImagesGrid.querySelectorAll('.remove-single-image').forEach(button => {
+            button.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const index = parseInt(e.target.closest('.remove-single-image').getAttribute('data-index'));
+                this.removeSingleImage(index);
+            });
+        });
+
+        // Set the first image as the primary one for backward compatibility
+        if (this.uploadedImages.length > 0) {
+            this.uploadedImagePath = this.uploadedImages[0].path;
+        }
+    }
+
+    async removeSingleImage(index) {
+        if (index < 0 || index >= this.uploadedImages.length) return;
+
+        const imageData = this.uploadedImages[index];
+        
+        // Clean up the specific image from server
+        await this.cleanupUploadedImage(imageData.path);
+        
+        // Remove from array
+        this.uploadedImages.splice(index, 1);
+        
+        if (this.uploadedImages.length === 0) {
+            // No images left, reset to upload state
+            await this.clearAllImages();
+        } else {
+            // Update preview and set new primary image
+            this.updateMultipleImagePreview();
+            this.uploadedImagePath = this.uploadedImages[0].path;
+        }
+    }
+
+    async generateBanner() {
+        await this.sendToCanva();
+    }
+
+    async sendToCanva() {
         const url = document.getElementById('url').value.trim();
         if (!url) {
             this.showError('Please enter a landing page URL');
@@ -298,28 +644,32 @@ class BannerMaker {
             return;
         }
 
-        // Check if background has been generated
-        if (!this.generatedBackgroundId) {
-            this.showError('Please generate AI background first');
+        // Check if we have uploaded images
+        if (this.uploadedImages.length === 0) {
+            this.showError('Please upload at least one image first');
             return;
         }
 
-        // Store current URL for regeneration
+        // Store current URL for reference
         this.currentUrl = url;
 
         const formData = {
             url: url,
             size: document.getElementById('bannerSize').value,
-            product_image_path: this.uploadedImagePath,
-            background_asset_id: this.generatedBackgroundId,
-            ...options
+            product_image_paths: this.uploadedImages.map(img => img.path), // Send all uploaded images
+            background_asset_id: this.generatedBackgroundId, // Optional
+            selected_copy: this.selectedCopy
         };
 
         try {
-            // Show progress section
-            this.showProgressSection();
+            // Mark extracted images for cleanup after successful Canva upload
+            this.markExtractedImagesForCleanup();
             
-            // Start generation
+            // Disable generate button immediately
+            document.getElementById('generateBtn').disabled = true;
+            document.getElementById('generateBtn').innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Sending to Canva...';
+            
+            // Send to Canva (simplified upload)
             const response = await fetch('/api/generate', {
                 method: 'POST',
                 headers: {
@@ -332,14 +682,32 @@ class BannerMaker {
 
             if (result.session_id) {
                 this.currentSessionId = result.session_id;
-                this.startPolling();
+                
+                // Check if already completed (immediate response from Canva API)
+                if (result.status === 'completed') {
+                    // Skip progress section entirely - show results directly
+                    await this.showResults(result);
+                } else {
+                    // Show progress section only for async operations
+                    this.showProgressSection();
+                    this.startPolling();
+                }
             } else {
-                throw new Error(result.error || 'Failed to start generation');
+                throw new Error(result.error || 'Failed to send to Canva');
             }
 
         } catch (error) {
-            console.error('Generation error:', error);
-            this.showError('Failed to start generation: ' + error.message);
+            console.error('Send to Canva error:', error);
+            this.showError('Failed to send to Canva: ' + error.message);
+            
+            // Re-enable button on error
+            const generateBtn = document.getElementById('generateBtn');
+            if (generateBtn) {
+                generateBtn.disabled = false;
+                generateBtn.className = 'bg-gradient-to-r from-blue-500 to-purple-600 text-white px-8 py-4 rounded-lg font-semibold text-lg shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-200';
+                generateBtn.innerHTML = '<i class="fas fa-upload mr-2"></i>Send to Canva';
+            }
+            
             this.hideProgressSection();
         }
     }
@@ -363,7 +731,7 @@ class BannerMaker {
         const generateBtn = document.getElementById('generateBtn');
         if (generateBtn) {
             generateBtn.disabled = false;
-            generateBtn.innerHTML = '<i class="fas fa-magic mr-2"></i>Generate AI Banner';
+            generateBtn.innerHTML = '<i class="fas fa-upload mr-2"></i>Send to Canva';
         }
     }
 
@@ -377,10 +745,10 @@ class BannerMaker {
 
                 if (result.status === 'completed') {
                     this.stopPolling();
-                    this.showResults(result);
+                    await this.showResults(result);
                 } else if (result.status === 'copy_selection_required') {
                     this.stopPolling();
-                    this.handleCopySelectionRequired(result);
+                    await this.handleCopySelectionRequired(result);
                 } else if (result.status === 'error') {
                     this.stopPolling();
                     this.showError('Generation failed: ' + result.error);
@@ -422,8 +790,14 @@ class BannerMaker {
         `;
     }
 
-    showResults(result) {
+    async showResults(result) {
         this.hideProgressSection();
+        
+        // Store design ID for independent background uploads
+        if (result.design_id) {
+            this.lastDesignId = result.design_id;
+            console.log('Stored design ID for future background uploads:', this.lastDesignId);
+        }
         
         // Show results section
         this.safeToggleClass('resultsSection', 'hidden', false);
@@ -442,9 +816,62 @@ class BannerMaker {
         if (resultsSection) {
             resultsSection.scrollIntoView({ behavior: 'smooth' });
         }
+        
+        // Clean up temporary extracted image after successful Canva upload
+        await this.cleanupExtractedImageIfNeeded();
     }
 
+    markExtractedImagesForCleanup() {
+        // Mark any extracted images for cleanup after Canva upload
+        const extractedImages = this.uploadedImages.filter(img => img.isExtracted);
+        if (extractedImages.length > 0) {
+            console.log('Marked extracted images for cleanup after Canva upload:', extractedImages.map(img => img.path));
+            this.isExtractedImage = true;
+            this.extractedImagePaths = extractedImages.map(img => img.path);
+        } else {
+            this.isExtractedImage = false;
+            this.extractedImagePaths = [];
+        }
+    }
 
+    async cleanupExtractedImageIfNeeded() {
+        // Clean up temporary extracted image files after successful Canva upload
+        if (this.isExtractedImage && this.extractedImagePaths && this.extractedImagePaths.length > 0) {
+            try {
+                console.log('Cleaning up temporary extracted images:', this.extractedImagePaths);
+                
+                const cleanupPromises = this.extractedImagePaths.map(async (imagePath) => {
+                    const response = await fetch('/api/cleanup-image', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            image_path: imagePath
+                        })
+                    });
+                    
+                    const result = await response.json();
+                    if (result.success) {
+                        console.log('✅ Extracted image cleaned up successfully:', imagePath);
+                    } else {
+                        console.warn('⚠️ Failed to cleanup extracted image:', imagePath, result.error);
+                    }
+                    
+                    return result;
+                });
+                
+                await Promise.all(cleanupPromises);
+                
+                // Reset tracking flags
+                this.isExtractedImage = false;
+                this.extractedImagePaths = [];
+                
+            } catch (error) {
+                console.warn('⚠️ Error during extracted image cleanup:', error);
+            }
+        }
+    }
 
     resetForm() {
         // Hide results
@@ -656,7 +1083,7 @@ class BannerMaker {
             const result = await response.json();
 
             if (result.variants) {
-                this.displayCopyVariants(result.variants);
+                await this.displayCopyVariants(result.variants);
                 this.updateGenerateButtonForCopySelection();
             } else {
                 throw new Error(result.error || 'Failed to load copy variants');
@@ -678,12 +1105,15 @@ class BannerMaker {
         await this.loadCopyVariantsForSelection(url);
     }
 
-    displayCopyVariants(variants) {
+    async displayCopyVariants(variants) {
         const container = document.getElementById('copyVariantsContainer');
         if (!container) {
             console.warn('copyVariantsContainer element not found');
             return;
         }
+        
+        // Store variants for later use
+        this.copyVariants = variants;
         
         container.innerHTML = '';
 
@@ -693,11 +1123,18 @@ class BannerMaker {
             
             variantDiv.innerHTML = `
                 <label class="flex items-start space-x-3 cursor-pointer">
-                    <input type="radio" name="copyVariant" value="${index}" class="mt-1" ${index === 0 ? 'checked' : ''}>
+                    <input type="radio" name="copyVariant" value="${index}" class="mt-1">
                     <div class="flex-1">
                         <div class="flex items-center justify-between mb-2">
                             <span class="font-semibold text-gray-800 capitalize">${variant.type}</span>
-                            <span class="text-xs text-gray-500">${variant.char_count} chars</span>
+                            <div class="flex items-center space-x-2">
+                                <span class="text-xs text-gray-500">${variant.char_count} chars</span>
+                                <button class="copy-to-clipboard-btn px-2 py-1 text-xs bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors" 
+                                        data-copy-text="${variant.text.replace(/"/g, '&quot;')}"
+                                        title="Copy to clipboard">
+                                    <i class="fas fa-copy"></i>
+                                </button>
+                            </div>
                         </div>
                         <p class="text-gray-700">${variant.text}</p>
                         <p class="text-xs text-gray-500 mt-1">${variant.tone}</p>
@@ -707,6 +1144,37 @@ class BannerMaker {
             
             container.appendChild(variantDiv);
         });
+
+        // Add event listeners for radio button changes (auto-copy on selection)
+        const radioButtons = container.querySelectorAll('input[name="copyVariant"]');
+        radioButtons.forEach((radio, index) => {
+            radio.addEventListener('change', async () => {
+                if (radio.checked) {
+                    // Copy to clipboard first
+                    await this.copyToClipboard(variants[index].text, `${variants[index].type} copy`);
+                    
+                    // Save selection to backend
+                    await this.selectCopyAndSave(index, false); // false = don't show additional success message since clipboard message was already shown
+                }
+            });
+        });
+
+        // Add event listeners for manual copy buttons
+        const copyButtons = container.querySelectorAll('.copy-to-clipboard-btn');
+        copyButtons.forEach(button => {
+            button.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const copyText = button.getAttribute('data-copy-text');
+                this.copyToClipboard(copyText, 'copy');
+            });
+        });
+
+        // Store the variants for later use
+        this.copyVariants = variants;
+        
+        // Show the generated copy section
+        this.safeToggleClass('generatedCopySection', 'hidden', false);
     }
 
     getSelectedCopyIndex() {
@@ -719,7 +1187,7 @@ class BannerMaker {
         container.innerHTML = `
             <div class="text-center text-gray-500 py-8">
                 <i class="fas fa-pen-fancy text-3xl mb-3"></i>
-                <p>Click "Generate AI Banner" to load copy options</p>
+                <p>Click "Send to Canva" to upload your assets</p>
             </div>
         `;
     }
@@ -758,15 +1226,10 @@ class BannerMaker {
 
     updateGenerateButtonForCopySelection() {
         const generateBtn = document.getElementById('generateBtn');
-        generateBtn.innerHTML = '<i class="fas fa-magic mr-2"></i>Generate Banner with Selected Copy';
-        
-        // Add event listener to radio buttons to update button text
-        const radioButtons = document.querySelectorAll('input[name="copyVariant"]');
-        radioButtons.forEach(radio => {
-            radio.addEventListener('change', () => {
-                generateBtn.innerHTML = '<i class="fas fa-magic mr-2"></i>Generate Banner with Selected Copy';
-            });
-        });
+        if (generateBtn) {
+            generateBtn.innerHTML = '<i class="fas fa-magic mr-2"></i>Generate Banner with Selected Copy';
+        }
+        // Note: Radio button event listeners are now handled in displayCopyVariants()
     }
 
     resetGenerateButton() {
@@ -774,13 +1237,13 @@ class BannerMaker {
         generateBtn.innerHTML = '<i class="fas fa-magic mr-2"></i>Generate AI Banner';
     }
 
-    handleCopySelectionRequired(result) {
+    async handleCopySelectionRequired(result) {
         // Hide progress section
         this.hideProgressSection();
         
         // Display copy variants
         if (result.copy_variants) {
-            this.displayCopyVariants(result.copy_variants);
+            await this.displayCopyVariants(result.copy_variants);
             this.updateGenerateButtonForCopySelection();
         }
         
@@ -969,28 +1432,27 @@ class BannerMaker {
 
     async handleExtractedImageDrop(image) {
         try {
-            // Show preview immediately
-            const previewImage = document.getElementById('previewImage');
-            const uploadedFileName = document.getElementById('uploadedFileName');
-            previewImage.src = image.src;
-            uploadedFileName.textContent = `Extracted: ${image.alt || 'Untitled'}`;
-            document.getElementById('uploadArea').classList.add('hidden');
-            document.getElementById('uploadPreview').classList.remove('hidden');
-
-            // Clean up previous upload if exists
-            if (this.uploadedImagePath) {
-                await this.cleanupUploadedImage(this.uploadedImagePath);
-            }
+            // Don't clear all images - add to existing collection
+            // await this.clearAllImages();
 
             // Convert image URL to file and upload
             await this.downloadAndUploadImage(image.src, image.alt || 'extracted_image');
+            
+            // Ensure we have a valid uploaded image path
+            if (!this.uploadedImagePath) {
+                throw new Error('Failed to get uploaded image path');
+            }
+            
+            // Update UI to show the new image
+            this.updateMultipleImagePreview();
             
             this.showSuccessMessage('Image added from extracted images!');
             
         } catch (error) {
             console.error('Error handling extracted image drop:', error);
             this.showError('Failed to use extracted image: ' + error.message);
-            this.removeUploadedImage();
+            // Don't clear all images on error - just show error
+            // await this.clearAllImages();
         }
     }
 
@@ -1024,6 +1486,18 @@ class BannerMaker {
             const result = await response.json();
             if (result.success) {
                 this.uploadedImagePath = result.filepath;
+                
+                // Add to uploaded images array with extracted flag for cleanup
+                const imageData = {
+                    path: result.filepath,
+                    name: `Extracted: ${filename}`,
+                    isExtracted: true,  // Mark as extracted for proper cleanup
+                    id: `extracted_${Date.now()}`
+                };
+                
+                this.uploadedImages.push(imageData);
+                console.log('Added extracted image to uploads list for cleanup:', result.filepath);
+                
             } else {
                 throw new Error(result.error || 'Upload failed');
             }
@@ -1389,6 +1863,7 @@ class BannerMaker {
         console.log('generateCopy method called');
         const url = document.getElementById('url').value.trim();
         const generateBtn = document.getElementById('generateCopyBtn');
+        const regenerateBtn = document.getElementById('regenerateCopyBtn');
         
         console.log('URL:', url);
         console.log('Generate button:', generateBtn);
@@ -1405,9 +1880,14 @@ class BannerMaker {
         }
 
         try {
-            // Show loading state
+            // Show loading state for both buttons
             generateBtn.disabled = true;
             generateBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Generating...';
+            
+            if (regenerateBtn) {
+                regenerateBtn.disabled = true;
+                regenerateBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Regenerating...';
+            }
             
             // Generate copy variants
             const response = await fetch('/api/generate-copy', {
@@ -1422,7 +1902,7 @@ class BannerMaker {
 
             if (result.success) {
                 this.copyVariants = result.variants;
-                this.displayCopyVariants(result.variants);
+                await this.displayCopyVariants(result.variants);
                 this.showSuccessMessage(`Generated ${result.variants.length} copy variants`);
             } else {
                 throw new Error(result.error || 'Failed to generate copy');
@@ -1432,9 +1912,14 @@ class BannerMaker {
             console.error('Error generating copy:', error);
             this.showError('Failed to generate copy: ' + error.message);
         } finally {
-            // Reset button state
+            // Reset button states
             generateBtn.disabled = false;
             generateBtn.innerHTML = '<i class="fas fa-pen-fancy mr-2"></i>Generate Copy';
+            
+            if (regenerateBtn) {
+                regenerateBtn.disabled = false;
+                regenerateBtn.innerHTML = '<i class="fas fa-redo mr-2"></i>Regenerate Copy';
+            }
         }
     }
 
@@ -1465,13 +1950,17 @@ class BannerMaker {
                 statusDisplay.innerHTML = `
                     <span class="text-blue-600">
                         <i class="fas fa-spinner fa-spin mr-2"></i>
-                        Generating AI background based on your copy...
+                        Generating AI background based on the prompt...
                     </span>
                 `;
                 statusDisplay.className = 'w-full px-4 py-3 border border-blue-300 rounded-lg bg-blue-50';
             }
             
-            // Generate background
+            // Get edited prompt from textarea
+            const promptTextarea = document.getElementById('backgroundPromptText');
+            const customPrompt = promptTextarea?.value?.trim();
+            
+            // Generate background with custom prompt if available
             const response = await fetch('/api/generate-background', {
                 method: 'POST',
                 headers: {
@@ -1479,6 +1968,7 @@ class BannerMaker {
                 },
                 body: JSON.stringify({ 
                     url: url,
+                    custom_background_prompt: customPrompt, // Send edited prompt
                     selected_copy: this.selectedCopy
                 })
             });
@@ -1505,6 +1995,64 @@ class BannerMaker {
                 generateBtn.disabled = false;
                 generateBtn.innerHTML = '<i class="fas fa-paint-brush mr-2"></i>Generate AI Background';
             }
+        }
+    }
+    
+    async sendBackgroundToCanva() {
+        if (!this.generatedBackgroundId) {
+            this.showError('No background generated yet. Please generate a background first.');
+            return;
+        }
+        
+        if (!this.lastDesignId) {
+            this.showError('No existing Canva design found. Please create a new design first using "Send to Canva".');
+            return;
+        }
+        
+        const sendBtn = document.getElementById('sendBackgroundBtn');
+        const originalText = sendBtn.innerHTML;
+        
+        try {
+            // Update button state
+            sendBtn.disabled = true;
+            sendBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Uploading...';
+            
+            const response = await fetch('/api/add-background-to-design', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    design_id: this.lastDesignId,
+                    background_asset_id: this.generatedBackgroundId
+                })
+            });
+            
+            const result = await response.json();
+            
+            if (result.success) {
+                this.showSuccessMessage('🎨 Background uploaded! It\'s now available in your Canva "Uploads" section.');
+                // Show link to design
+                if (result.design_url) {
+                    setTimeout(() => {
+                        const viewLink = `<a href="${result.design_url}" target="_blank" class="text-blue-600 underline ml-2">Open Design to Add Background</a>`;
+                        const successMsg = document.querySelector('.success-message');
+                        if (successMsg) {
+                            successMsg.innerHTML += viewLink;
+                        }
+                    }, 1000);
+                }
+            } else {
+                throw new Error(result.error || 'Failed to add background to design');
+            }
+            
+        } catch (error) {
+            console.error('Error adding background to Canva:', error);
+            this.showError('Failed to add background to Canva: ' + error.message);
+        } finally {
+            // Reset button
+            sendBtn.disabled = false;
+            sendBtn.innerHTML = originalText;
         }
     }
 
@@ -1552,9 +2100,54 @@ class BannerMaker {
     }
 
     checkIfReadyForBannerGeneration() {
-        // Check if we have both copy and background ready
-        if (this.selectedCopy && this.generatedBackgroundId) {
+        // Background generation is now optional - just need copy
+        if (this.selectedCopy) {
             this.enableBannerGeneration();
+        }
+    }
+    
+    showBackgroundPrompt(selectedCopy) {
+        const promptSection = document.getElementById('backgroundPromptSection');
+        const promptText = document.getElementById('backgroundPromptText');
+        
+        console.log('🔍 showBackgroundPrompt called');
+        console.log('🔍 selectedCopy:', selectedCopy);
+        console.log('🔍 background_prompt:', selectedCopy?.background_prompt);
+        
+        if (promptSection && promptText) {
+            // Create a meaningful prompt based on the selected copy
+            let prompt = '';
+            
+            if (selectedCopy && selectedCopy.background_prompt && selectedCopy.background_prompt.trim()) {
+                prompt = selectedCopy.background_prompt.trim();
+            } else {
+                // Create default prompt based on copy type and text
+                const copyType = selectedCopy?.type || 'professional';
+                const copyText = selectedCopy?.text || '';
+                
+                prompt = `Create an abstract ${copyType} marketing background that complements this message: "${copyText.substring(0, 100)}...". Use modern, clean design elements that enhance readability without being distracting.`;
+                console.log('✅ Using generated default prompt:', prompt);
+            }
+            
+            promptText.value = prompt;
+
+        } else {
+            console.error('❌ Missing elements - promptSection:', promptSection, 'promptText:', promptText);
+        }
+    }
+    
+    enableCanvaUpload() {
+        const generateBtn = document.getElementById('generateBtn');
+        const helpText = generateBtn?.parentElement?.querySelector('p');
+        
+        if (generateBtn) {
+            generateBtn.disabled = false;
+            generateBtn.className = 'bg-gradient-to-r from-blue-500 to-purple-600 text-white px-8 py-4 rounded-lg font-semibold text-lg shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-200';
+        }
+        
+        if (helpText) {
+            helpText.textContent = 'Ready to send to Canva! Background generation is optional.';
+            helpText.className = 'text-sm text-green-600 mt-2';
         }
     }
 
@@ -1573,90 +2166,17 @@ class BannerMaker {
         
         if (generateBtn) {
             generateBtn.disabled = false;
-            generateBtn.className = 'bg-gradient-to-r from-green-500 to-blue-600 text-white px-6 py-3 rounded-lg font-semibold shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-200';
+            generateBtn.className = 'bg-gradient-to-r from-purple-500 to-pink-600 text-white px-6 py-3 rounded-lg font-semibold shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-200';
         }
         
         if (statusDisplay) {
             statusDisplay.innerHTML = `
-                <span class="text-blue-600">
-                    <i class="fas fa-info-circle mr-2"></i>
-                    Ready to generate AI background based on your selected copy
+                <span class="text-green-600">
+                    <i class="fas fa-check-circle mr-2"></i>
+                    Background generation ready, or skip to use Canva's backgrounds
                 </span>
             `;
-            statusDisplay.className = 'w-full px-4 py-3 border border-blue-300 rounded-lg bg-blue-50';
-        }
-    }
-
-    displayCopyVariants(variants) {
-        const section = document.getElementById('generatedCopySection');
-        const container = document.getElementById('copyVariantsContainer');
-        
-        if (!container) {
-            console.warn('copyVariantsContainer element not found');
-            return;
-        }
-        
-        // Clear previous variants
-        container.innerHTML = '';
-        
-        variants.forEach((variant, index) => {
-            const variantDiv = document.createElement('div');
-            variantDiv.className = 'border border-gray-200 rounded-lg p-4 hover:border-blue-300 transition-colors';
-            
-            variantDiv.innerHTML = `
-                <div class="flex items-start justify-between mb-3">
-                    <div class="flex items-center space-x-2">
-                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 capitalize">
-                            ${variant.type}
-                        </span>
-                        <span class="text-xs text-gray-500">${variant.char_count} chars</span>
-                    </div>
-                    <button class="select-copy-btn px-3 py-1 bg-green-500 text-white rounded text-xs hover:bg-green-600 transition-colors" 
-                            data-index="${index}">
-                        Select
-                    </button>
-                </div>
-                <div class="mb-3">
-                    <textarea class="copy-text w-full p-3 border border-gray-300 rounded-lg resize-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500" 
-                              rows="2" 
-                              data-index="${index}">${variant.text}</textarea>
-                </div>
-                <p class="text-xs text-gray-500">${variant.tone}</p>
-            `;
-            
-            container.appendChild(variantDiv);
-        });
-
-        // Add event listeners for select buttons and text changes
-        container.querySelectorAll('.select-copy-btn').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                const index = parseInt(e.target.dataset.index);
-                this.selectCopy(index);
-            });
-        });
-
-        container.querySelectorAll('.copy-text').forEach(textarea => {
-            textarea.addEventListener('input', (e) => {
-                const index = parseInt(e.target.dataset.index);
-                this.updateCopyVariant(index, e.target.value);
-            });
-        });
-        
-        // Show the section
-        section.classList.remove('hidden');
-    }
-
-    updateCopyVariant(index, newText) {
-        if (this.copyVariants[index]) {
-            this.copyVariants[index].text = newText;
-            this.copyVariants[index].char_count = newText.length;
-            
-            // Update character count display
-            const container = document.getElementById('copyVariantsContainer');
-            const charCountSpan = container.children[index].querySelector('.text-xs.text-gray-500');
-            charCountSpan.textContent = `${newText.length} chars`;
+            statusDisplay.className = 'w-full px-4 py-3 border border-green-300 rounded-lg bg-green-50';
         }
     }
 
@@ -1689,8 +2209,60 @@ class BannerMaker {
             if (result.success) {
                 this.updateCopyStatus(selectedCopy);
                 this.showBackgroundSection();
+                this.showBackgroundPrompt(selectedCopy);
                 this.enableBackgroundGeneration();
-                this.showSuccessMessage('Copy selected successfully!');
+                this.enableCanvaUpload(); // Enable Send to Canva immediately
+                this.showSuccessMessage('📋 Copy selected successfully and copied to clipboard!');
+            } else {
+                // Reset on failure
+                this.selectedCopy = null;
+                throw new Error(result.error || 'Failed to save copy selection');
+            }
+
+        } catch (error) {
+            console.error('Error selecting copy:', error);
+            this.selectedCopy = null;
+            this.showError('Failed to select copy: ' + error.message);
+        }
+    }
+
+    async selectCopyAndSave(index, showSuccessMessage = true) {
+        if (!this.copyVariants[index]) {
+            this.showError('Invalid copy selection');
+            return;
+        }
+
+        const selectedCopy = this.copyVariants[index];
+        const url = document.getElementById('url').value.trim();
+
+        try {
+            // Set selectedCopy immediately to prevent race conditions
+            this.selectedCopy = selectedCopy;
+            
+            // Save selected copy to backend
+            const response = await fetch('/api/save-selected-copy', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ 
+                    url: url,
+                    selected_copy: selectedCopy
+                })
+            });
+
+            const result = await response.json();
+            if (result.success) {
+                this.updateCopyStatus(selectedCopy);
+                this.showBackgroundSection();
+                this.showBackgroundPrompt(selectedCopy);
+                this.enableBackgroundGeneration();
+                this.enableCanvaUpload(); // Enable Send to Canva immediately
+                
+                // Only show success message if requested (to avoid duplicate messages)
+                if (showSuccessMessage) {
+                    this.showSuccessMessage('📋 Copy selected successfully and copied to clipboard!');
+                }
             } else {
                 // Reset on failure
                 this.selectedCopy = null;
@@ -1724,16 +2296,128 @@ class BannerMaker {
     }
 
     enableBannerGeneration() {
-        const generateBtn = document.getElementById('generateBtn');
-        const helpText = generateBtn.parentElement.querySelector('p');
+        // This function is now handled by enableCanvaUpload()
+        // Background generation is optional
+        this.enableCanvaUpload();
+    }
+
+    async generateExplanation() {
+        console.log('generateExplanation method called');
         
-        generateBtn.disabled = false;
-        generateBtn.className = 'bg-gradient-to-r from-blue-500 to-purple-600 text-white px-8 py-4 rounded-lg font-semibold text-lg shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-200';
-        
-        if (helpText) {
-            helpText.textContent = 'Send your copy and background to Canva!';
-            helpText.className = 'text-sm text-green-600 mt-2';
+        const url = document.getElementById('url').value.trim();
+        if (!url) {
+            this.showError('Please enter a URL first');
+            return;
         }
+        
+        const generateBtn = document.getElementById('generateExplanationBtn');
+        const regenerateBtn = document.getElementById('regenerateExplanationBtn');
+        const originalGenerateText = generateBtn.innerHTML;
+        const originalRegenerateText = regenerateBtn ? regenerateBtn.innerHTML : '';
+        
+        try {
+            // Update button states
+            generateBtn.disabled = true;
+            generateBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Generating...';
+            if (regenerateBtn) {
+                regenerateBtn.disabled = true;
+                regenerateBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Regenerating...';
+            }
+            
+            const response = await fetch('/api/generate-explanation', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ url })
+            });
+            
+            const result = await response.json();
+            
+            if (result.success) {
+                // Show the explanation section and populate it
+                this.showExplanationSection(result.explanation);
+                this.showSuccessMessage('✨ Creative explanation generated successfully!');
+                console.log('Explanation generated:', result.explanation);
+            } else {
+                throw new Error(result.error || 'Failed to generate explanation');
+            }
+            
+        } catch (error) {
+            console.error('Error generating explanation:', error);
+            this.showError('Failed to generate explanation: ' + error.message);
+        } finally {
+            // Reset button states
+            generateBtn.disabled = false;
+            generateBtn.innerHTML = originalGenerateText;
+            if (regenerateBtn) {
+                regenerateBtn.disabled = false;
+                regenerateBtn.innerHTML = originalRegenerateText || '<i class="fas fa-redo mr-2"></i>Regenerate Explanation';
+            }
+        }
+    }
+
+    showExplanationSection(explanation) {
+        const explanationSection = document.getElementById('explanationSection');
+        const explanationContent = document.getElementById('explanationContent');
+        const explanationIndicator = document.getElementById('explanationIndicator');
+        const regenerateBtn = document.getElementById('regenerateExplanationBtn');
+        
+        if (!explanationSection || !explanationContent) {
+            console.warn('Explanation section elements not found');
+            return;
+        }
+        
+        // Show the section
+        explanationSection.classList.remove('hidden');
+        
+        // Populate the explanation content
+        explanationContent.innerHTML = explanation.html_content;
+        
+        // Show success indicator
+        if (explanationIndicator) {
+            explanationIndicator.classList.remove('hidden');
+        }
+        
+        // Show regenerate button
+        if (regenerateBtn) {
+            regenerateBtn.classList.remove('hidden');
+        }
+        
+        // Add copy-to-clipboard functionality for explanation sections
+        this.addCopyToClipboardHandlers(explanationContent);
+    }
+
+    addCopyToClipboardHandlers(container) {
+        // Add copy buttons to each section
+        const sections = container.querySelectorAll('h3');
+        sections.forEach(section => {
+            const copyBtn = document.createElement('button');
+            copyBtn.className = 'ml-2 text-xs text-blue-600 hover:text-blue-800 opacity-70 hover:opacity-100';
+            copyBtn.innerHTML = '<i class="fas fa-copy"></i>';
+            copyBtn.title = 'Copy section to clipboard';
+            
+            copyBtn.addEventListener('click', async () => {
+                // Get the section content including the heading and following content
+                let content = section.outerHTML;
+                let nextElement = section.nextElementSibling;
+                
+                // Collect content until next h3 or end
+                while (nextElement && nextElement.tagName !== 'H3') {
+                    content += '\n' + nextElement.outerHTML;
+                    nextElement = nextElement.nextElementSibling;
+                }
+                
+                // Convert HTML to plain text for clipboard
+                const tempDiv = document.createElement('div');
+                tempDiv.innerHTML = content;
+                const plainText = tempDiv.textContent || tempDiv.innerText || '';
+                
+                await this.copyToClipboard(plainText, 'explanation section');
+            });
+            
+            section.appendChild(copyBtn);
+        });
     }
 }
 

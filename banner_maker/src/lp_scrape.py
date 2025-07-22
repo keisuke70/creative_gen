@@ -5,12 +5,59 @@ from selectolax.parser import HTMLParser
 import base64
 from io import BytesIO
 from PIL import Image
+import logging
+
+# Import enhanced scraper
+from .enhanced_scraper import EnhancedWebScraper, scrape_landing_page_enhanced
+
+logger = logging.getLogger(__name__)
 
 
-async def scrape_landing_page(url: str) -> Dict:
+async def scrape_landing_page(url: str, use_enhanced: bool = True) -> Dict:
     """
-    Scrape landing page for images and text content using Playwright.
-    Returns the largest viable image (≥300px²) and page text.
+    Scrape landing page for images and text content using enhanced Playwright scraper.
+    Falls back to legacy scraper if enhanced version fails.
+    
+    Args:
+        url: URL to scrape
+        use_enhanced: Whether to use the enhanced scraper (default: True)
+    
+    Returns:
+        Dict with extracted content including text, images, metadata
+    """
+    if use_enhanced:
+        try:
+            # Use enhanced scraper with comprehensive text extraction
+            result = await scrape_landing_page_enhanced(url)
+            
+            # Transform result to match legacy format for backward compatibility
+            legacy_result = {
+                'url': result.get('url', url),
+                'text_content': result.get('text_content', ''),
+                'images': result.get('images', []),
+                'hero_image_data': result.get('hero_image_data'),
+                'has_viable_image': result.get('has_viable_image', False),
+                
+                # Enhanced fields
+                'metadata': result.get('metadata', {}),
+                'content_stats': result.get('content_stats', {}),
+                'raw_text_content': result.get('raw_text_content', ''),
+                'enhanced': True
+            }
+            
+            logger.info(f"Successfully scraped {url} with enhanced scraper")
+            return legacy_result
+            
+        except Exception as e:
+            logger.warning(f"Enhanced scraper failed for {url}, falling back to legacy: {e}")
+    
+    # Legacy scraper fallback
+    return await _scrape_landing_page_legacy(url)
+
+
+async def _scrape_landing_page_legacy(url: str) -> Dict:
+    """
+    Legacy scraper implementation (original code) for fallback
     """
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
@@ -76,14 +123,15 @@ async def scrape_landing_page(url: str) -> Dict:
                     if response and response.status == 200:
                         hero_image_data = await response.body()
                 except Exception as e:
-                    print(f"Failed to download image {largest_img['src']}: {e}")
+                    logger.warning(f"Failed to download image {largest_img['src']}: {e}")
             
             return {
                 'url': url,
                 'text_content': text_content,
                 'images': images,
                 'hero_image_data': hero_image_data,
-                'has_viable_image': len(images) > 0
+                'has_viable_image': len(images) > 0,
+                'enhanced': False
             }
             
         finally:
