@@ -556,38 +556,58 @@ class BannerMaker {
     }
 
     updateMultipleImagePreview() {
-        if (this.uploadedImages.length === 0) return;
+        console.log('updateMultipleImagePreview called, uploadedImages.length:', this.uploadedImages.length);
+        
+        if (this.uploadedImages.length === 0) {
+            console.log('No uploaded images, skipping preview update');
+            return;
+        }
 
         // Hide upload area and show preview
-        document.getElementById('uploadArea').classList.add('hidden');
+        const uploadArea = document.getElementById('uploadArea');
         const uploadPreview = document.getElementById('uploadPreview');
+        
+        uploadArea.classList.add('hidden');
         uploadPreview.classList.remove('hidden');
+        
+        console.log('Upload area hidden, preview shown');
 
         // Update the uploaded count
-        document.getElementById('uploadedCount').textContent = this.uploadedImages.length;
+        const uploadedCount = document.getElementById('uploadedCount');
+        uploadedCount.textContent = this.uploadedImages.length;
+        console.log('Updated count to:', this.uploadedImages.length);
 
         // Get the grid container
         const uploadedImagesGrid = document.getElementById('uploadedImagesGrid');
         
         // Generate preview HTML for existing grid (this is used for single additions or refreshes)
-        uploadedImagesGrid.innerHTML = this.uploadedImages.map((imageData, index) => `
-            <div class="image-item relative" data-image-id="${imageData.id}">
-                <img src="/uploads/${imageData.path.split('/').pop()}" 
-                     alt="${imageData.name}" 
-                     class="w-full h-24 object-cover rounded-lg border border-gray-300">
-                <div class="absolute top-1 right-1">
-                    <button type="button" 
-                            class="remove-single-image bg-red-500 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs hover:bg-red-600 transition-colors" 
-                            data-index="${index}"
-                            title="Remove ${imageData.name}">
-                        <i class="fas fa-times"></i>
-                    </button>
+        const gridHTML = this.uploadedImages.map((imageData, index) => {
+            const imagePath = imageData.path.startsWith('/uploads/') ? imageData.path : `/uploads/${imageData.path.split('/').pop()}`;
+            console.log('Generating grid item for image:', imagePath, 'name:', imageData.name);
+            
+            return `
+                <div class="image-item relative" data-image-id="${imageData.id}">
+                    <img src="${imagePath}" 
+                         alt="${imageData.name}" 
+                         class="w-full h-24 object-cover rounded-lg border border-gray-300"
+                         onerror="console.error('Failed to load image:', this.src)">
+                    <div class="absolute top-1 right-1">
+                        <button type="button" 
+                                class="remove-single-image bg-red-500 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs hover:bg-red-600 transition-colors" 
+                                data-index="${index}"
+                                title="Remove ${imageData.name}">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
+                    <div class="mt-1 text-xs text-gray-600 truncate px-1" title="${imageData.name}">
+                        ${imageData.name}
+                    </div>
                 </div>
-                <div class="mt-1 text-xs text-gray-600 truncate px-1" title="${imageData.name}">
-                    ${imageData.name}
-                </div>
-            </div>
-        `).join('');
+            `;
+        }).join('');
+        
+        uploadedImagesGrid.innerHTML = gridHTML;
+        console.log('Grid HTML updated with', this.uploadedImages.length, 'images');
 
         // Add event listeners for individual remove buttons
         uploadedImagesGrid.querySelectorAll('.remove-single-image').forEach(button => {
@@ -601,6 +621,7 @@ class BannerMaker {
         // Set the first image as the primary one for backward compatibility
         if (this.uploadedImages.length > 0) {
             this.uploadedImagePath = this.uploadedImages[0].path;
+            console.log('Set primary image path to:', this.uploadedImagePath);
         }
     }
 
@@ -902,8 +923,9 @@ class BannerMaker {
     }
 
     resetForm() {
-        // Hide results
+        // Hide results and progress sections
         this.safeToggleClass('resultsSection', 'hidden', true);
+        this.hideProgressSection();
         
         // Clear form
         const urlInput = document.getElementById('url');
@@ -921,6 +943,23 @@ class BannerMaker {
         
         // Remove uploaded image
         this.removeUploadedImage();
+        
+        // Hide and clear extracted images section
+        this.hideExtractedImages();
+        const extractedImagesGrid = document.getElementById('extractedImagesGrid');
+        if (extractedImagesGrid) {
+            extractedImagesGrid.innerHTML = '';
+        }
+        
+        // Clear extracted images tracking array
+        this.extractedImagePaths = [];
+        
+        // Hide explanation section
+        this.safeToggleClass('explanationSection', 'hidden', true);
+        const explanationContent = document.getElementById('explanationContent');
+        if (explanationContent) {
+            explanationContent.innerHTML = '';
+        }
         
         // Reset copy state
         this.selectedCopy = null;
@@ -944,8 +983,8 @@ class BannerMaker {
         if (backgroundStatusDisplay) {
             backgroundStatusDisplay.innerHTML = `
                 <span class="text-gray-500">
-                    <i class="fas fa-exclamation-triangle mr-2 text-orange-500"></i>
-                    Please select copy first to generate background
+                    <i class="fas fa-info-circle mr-2"></i>
+                    Select copy first to see background prompt
                 </span>
             `;
             backgroundStatusDisplay.className = 'w-full px-4 py-3 border border-gray-300 rounded-lg bg-gray-50';
@@ -957,6 +996,12 @@ class BannerMaker {
             backgroundPreview.classList.add('hidden');
         }
         
+        // Clear background prompt text
+        const backgroundPromptText = document.getElementById('backgroundPromptText');
+        if (backgroundPromptText) {
+            backgroundPromptText.value = '';
+        }
+        
         // Disable banner generation again
         const generateBtn = document.getElementById('generateBtn');
         const helpText = generateBtn.parentElement.querySelector('p');
@@ -964,7 +1009,7 @@ class BannerMaker {
         generateBtn.className = 'bg-gradient-to-r from-gray-400 to-gray-500 text-white px-8 py-4 rounded-lg font-semibold text-lg shadow-lg disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200';
         
         if (helpText) {
-            helpText.textContent = 'Generate copy and background first to enable Canva upload';
+            helpText.textContent = 'Generate and select copy first. Explanation and background generation are optional.';
             helpText.className = 'text-sm text-gray-500 mt-2';
         }
         
@@ -1082,6 +1127,41 @@ class BannerMaker {
                 errorDiv.remove();
             }
         }, 5000);
+    }
+
+    showLoadingMessage(message) {
+        // Create loading notification
+        const loadingDiv = document.createElement('div');
+        loadingDiv.className = 'fixed top-4 right-4 bg-blue-500 text-white px-6 py-3 rounded-lg shadow-lg z-50';
+        loadingDiv.id = 'loading-notification';
+        loadingDiv.innerHTML = `
+            <div class="flex items-center">
+                <i class="fas fa-spinner fa-spin mr-2"></i>
+                <span>${message}</span>
+            </div>
+        `;
+        
+        // Remove any existing loading notification
+        const existing = document.getElementById('loading-notification');
+        if (existing) {
+            existing.remove();
+        }
+        
+        document.body.appendChild(loadingDiv);
+        
+        // Auto-remove after 10 seconds (in case success/error doesn't clear it)
+        setTimeout(() => {
+            if (loadingDiv.parentElement) {
+                loadingDiv.remove();
+            }
+        }, 10000);
+    }
+
+    hideLoadingMessage() {
+        const loadingDiv = document.getElementById('loading-notification');
+        if (loadingDiv) {
+            loadingDiv.remove();
+        }
     }
 
     toggleCopyVariantsSection(show) {
@@ -1460,32 +1540,54 @@ class BannerMaker {
 
     async handleExtractedImageDrop(image) {
         try {
-            // Don't clear all images - add to existing collection
-            // await this.clearAllImages();
-
+            console.log('Starting extracted image drop handling for:', image.src);
+            
+            // Show immediate loading feedback
+            this.showLoadingMessage('Adding image from extracted images...');
+            
             // Convert image URL to file and upload
             await this.downloadAndUploadImage(image.src, image.alt || 'extracted_image');
             
-            // Ensure we have a valid uploaded image path
-            if (!this.uploadedImagePath) {
-                throw new Error('Failed to get uploaded image path');
+            // Ensure we have uploaded images
+            if (this.uploadedImages.length === 0) {
+                throw new Error('Failed to add image to upload collection');
             }
             
-            // Update UI to show the new image
+            // Force update UI to show the new image
             this.updateMultipleImagePreview();
             
+            // Additional verification that the preview is showing
+            const uploadPreview = document.getElementById('uploadPreview');
+            const uploadArea = document.getElementById('uploadArea');
+            
+            if (uploadPreview && uploadArea) {
+                uploadArea.classList.add('hidden');
+                uploadPreview.classList.remove('hidden');
+                
+                // Update count display
+                const countElement = document.getElementById('uploadedCount');
+                if (countElement) {
+                    countElement.textContent = this.uploadedImages.length;
+                }
+            }
+            
+            console.log('Successfully processed extracted image drop. Total images:', this.uploadedImages.length);
+            
+            // Hide loading message and show success
+            this.hideLoadingMessage();
             this.showSuccessMessage('Image added from extracted images!');
             
         } catch (error) {
             console.error('Error handling extracted image drop:', error);
+            this.hideLoadingMessage();
             this.showError('Failed to use extracted image: ' + error.message);
-            // Don't clear all images on error - just show error
-            // await this.clearAllImages();
         }
     }
 
     async downloadAndUploadImage(imageUrl, filename) {
         try {
+            console.log('Starting download and upload for:', imageUrl, 'filename:', filename);
+            
             // Use final proxy approach - this saves the image permanently
             const response = await fetch('/api/proxy-image', {
                 method: 'POST',
@@ -1499,6 +1601,7 @@ class BannerMaker {
             });
 
             if (!response.ok) {
+                console.warn('Primary proxy failed, trying fallback method');
                 // Fallback: try to fetch directly and upload as blob
                 const imgResponse = await fetch(imageUrl, { mode: 'cors' });
                 if (!imgResponse.ok) {
@@ -1508,10 +1611,13 @@ class BannerMaker {
                 const blob = await imgResponse.blob();
                 const file = new File([blob], `${filename}.jpg`, { type: 'image/jpeg' });
                 await this.handleFileUpload(file);
+                console.log('Fallback upload completed successfully');
                 return;
             }
 
             const result = await response.json();
+            console.log('Proxy-image response:', result);
+            
             if (result.success) {
                 this.uploadedImagePath = result.filepath;
                 
@@ -1520,11 +1626,12 @@ class BannerMaker {
                     path: result.filepath,
                     name: `Extracted: ${filename}`,
                     isExtracted: true,  // Mark as extracted for proper cleanup
-                    id: `extracted_${Date.now()}`
+                    id: `extracted_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
                 };
                 
                 this.uploadedImages.push(imageData);
-                console.log('Added extracted image to uploads list for cleanup:', result.filepath);
+                console.log('Added extracted image to uploads list:', imageData);
+                console.log('Current uploadedImages array length:', this.uploadedImages.length);
                 
             } else {
                 throw new Error(result.error || 'Upload failed');
