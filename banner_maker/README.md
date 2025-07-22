@@ -83,28 +83,59 @@ Webスクレイピング（アンチボット強化） →
 
 #### **Linux/Mac/WSL:**
 ```bash
-# banner_makerディレクトリに移動
+# creative_genディレクトリに移動（banner_makerの親ディレクトリ）
+cd /path/to/creative_gen  # プロジェクトのルートディレクトリに置き換えてください
+
+# 仮想環境が存在しない場合は作成
+if [ ! -d "venv" ]; then
+    echo "仮想環境を作成中..."
+    python3 -m venv venv
+fi
+
+# 仮想環境をアクティベート
+source venv/bin/activate
+
+# banner_makerディレクトリに移動して依存関係をインストール
 cd banner_maker
-
-# 仮想環境を作成・アクティベート
-python3 -m venv banner_maker_env
-source banner_maker_env/bin/activate
-
-# 依存関係をインストール
 pip install -r requirements.txt
 playwright install chromium
 ```
 
 #### **Windows PowerShell:**
 ```powershell
-# banner_makerディレクトリに移動
+# creative_genディレクトリに移動（banner_makerの親ディレクトリ）
+cd C:\path\to\creative_gen  # プロジェクトのルートディレクトリに置き換えてください
+
+# 仮想環境が存在しない場合は作成
+if (-not (Test-Path "venv")) {
+    Write-Host "仮想環境を作成中..."
+    python -m venv venv
+}
+
+# 仮想環境をアクティベート
+venv\Scripts\Activate.ps1
+
+# banner_makerディレクトリに移動して依存関係をインストール
 cd banner_maker
+pip install -r requirements.txt
+playwright install chromium
+```
 
-# 仮想環境を作成・アクティベート
-python -m venv banner_maker_env
-banner_maker_env\Scripts\Activate.ps1
+#### **シンプルなステップバイステップ（初回セットアップ）:**
+```bash
+# 1. プロジェクトディレクトリに移動
+cd /path/to/creative_gen
 
-# 依存関係をインストール
+# 2. 仮想環境を作成（初回のみ）
+python3 -m venv venv  # Linux/Mac/WSL
+# python -m venv venv  # Windows
+
+# 3. 仮想環境をアクティベート
+source venv/bin/activate  # Linux/Mac/WSL
+# venv\Scripts\Activate.ps1  # Windows
+
+# 4. banner_makerに移動して依存関係インストール
+cd banner_maker
 pip install -r requirements.txt
 playwright install chromium
 ```
@@ -140,9 +171,13 @@ PORT=5000
 
 #### **手動開始:**
 ```bash
-# 環境をアクティベート
-source banner_maker_env/bin/activate  # Linux/Mac/WSL
-# banner_maker_env\Scripts\Activate.ps1  # Windows
+# creative_genディレクトリから環境をアクティベート
+source ../venv/bin/activate  # Linux/Mac/WSL (banner_makerディレクトリから実行)
+# ..\venv\Scripts\Activate.ps1  # Windows (banner_makerディレクトリから実行)
+
+# または、creative_genディレクトリから:
+# source venv/bin/activate && cd banner_maker  # Linux/Mac/WSL
+# venv\Scripts\Activate.ps1 && cd banner_maker  # Windows
 
 # Webサーバーを開始
 cd web_app
