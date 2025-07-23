@@ -667,32 +667,7 @@ class BannerMaker {
         // Store current URL for reference
         this.currentUrl = url;
 
-        // Upload background to Canva first if generated locally
-        if (this.generatedBackgroundPath && !this.generatedBackgroundId) {
-            try {
-                document.getElementById('generateBtn').innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Uploading background...';
-                
-                const bgResponse = await fetch('/api/upload-background-to-canva', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        background_file_path: this.generatedBackgroundPath,
-                        background_filename: this.generatedBackgroundFilename
-                    })
-                });
-                
-                const bgResult = await bgResponse.json();
-                if (bgResult.success) {
-                    this.generatedBackgroundId = bgResult.background_asset_id;
-                } else {
-                    console.warn('Failed to upload background to Canva:', bgResult.error);
-                }
-            } catch (error) {
-                console.warn('Error uploading background to Canva:', error);
-            }
-        }
+        // Background is already uploaded to Canva during generation if it exists
 
         const formData = {
             url: url,
@@ -834,18 +809,10 @@ class BannerMaker {
     async showResults(result) {
         this.hideProgressSection();
         
-        // Store design ID for independent background uploads
+        // Store design ID for future reference
         if (result.design_id) {
             this.lastDesignId = result.design_id;
-            console.log('Stored design ID for future background uploads:', this.lastDesignId);
-            
-            // Show separate send background button if background was generated locally but not included
-            if (this.generatedBackgroundPath && !this.generatedBackgroundId) {
-                const sendBackgroundBtn = document.getElementById('sendBackgroundBtn');
-                if (sendBackgroundBtn) {
-                    sendBackgroundBtn.style.display = 'inline-block';
-                }
-            }
+            console.log('Stored design ID for future reference:', this.lastDesignId);
         }
         
         // Show results section
@@ -2054,7 +2021,7 @@ class BannerMaker {
                 statusDisplay.innerHTML = `
                     <span class="text-blue-600">
                         <i class="fas fa-spinner fa-spin mr-2"></i>
-                        Generating AI background based on the prompt...
+                        Generating AI background based on the prompt and sending to Canva...
                     </span>
                 `;
                 statusDisplay.className = 'w-full px-4 py-3 border border-blue-300 rounded-lg bg-blue-50';
@@ -2080,13 +2047,11 @@ class BannerMaker {
             const result = await response.json();
 
             if (result.success) {
-                // Store generated background data for upload later
-                this.generatedBackgroundPath = result.background_file_path;
-                this.generatedBackgroundFilename = result.background_filename;
+                // Store generated background asset ID (already uploaded to Canva)
+                this.generatedBackgroundId = result.background_asset_id;
                 this.showBackgroundPreview(result.background_url);
                 this.updateBackgroundStatus(true);
-                this.showSuccessMessage('AI background generated successfully! Click "Send Background to Canva" to upload it.');
-                this.showSendBackgroundButton();
+                this.showSuccessMessage('AI background generated and uploaded to Canva successfully!');
                 this.checkIfReadyForBannerGeneration();
             } else {
                 throw new Error(result.error || 'Failed to generate background');
@@ -2165,6 +2130,12 @@ class BannerMaker {
         
         previewImage.src = backgroundUrl;
         preview.classList.remove('hidden');
+        
+        // Hide the send background button since backgrounds are auto-uploaded
+        const sendBackgroundBtn = document.getElementById('sendBackgroundBtn');
+        if (sendBackgroundBtn) {
+            sendBackgroundBtn.style.display = 'none';
+        }
     }
 
     updateBackgroundStatus(success, message = null) {
@@ -2178,7 +2149,7 @@ class BannerMaker {
             statusDisplay.innerHTML = `
                 <span class="text-green-600">
                     <i class="fas fa-check-circle mr-2"></i>
-                    AI background generated successfully
+                    AI background generated successfully and uploaded to Canva!
                 </span>
             `;
             statusDisplay.className = 'w-full px-4 py-3 border border-green-300 rounded-lg bg-green-50';
@@ -2196,7 +2167,7 @@ class BannerMaker {
     showSendBackgroundButton() {
         const sendBtn = document.getElementById('sendBackgroundBtn');
         if (sendBtn) {
-            // Hide initially - will be shown after main send to Canva
+            // Keep hidden since backgrounds are automatically uploaded to Canva
             sendBtn.style.display = 'none';
             sendBtn.disabled = false;
         }
@@ -2222,14 +2193,50 @@ class BannerMaker {
             let prompt = '';
             
             if (selectedCopy && selectedCopy.background_prompt && selectedCopy.background_prompt.trim()) {
-                prompt = selectedCopy.background_prompt.trim();
+                // Use existing background prompt but enhance it with copy information
+                const basePrompt = selectedCopy.background_prompt.trim();
+                const copyText = selectedCopy?.text || '';
+                const copyType = selectedCopy?.type || 'professional';
+                const tone = selectedCopy?.tone || 'professional';
+                
+                // Extract headline (first line) 
+                const lines = copyText.split('\n').filter(line => line.trim());
+                const headline = lines[0] || '';
+                
+                prompt = `${basePrompt}
+
+このコピーに合うように調整：
+- メインメッセージ: "${headline}"
+- コピータイプ: ${copyType}
+- このマーケティングメッセージの感情的アピールと${tone}な雰囲気をサポートする視覚的スタイルで作成してください`;
             } else {
-                // Create default prompt based on copy type and text
+                // Create comprehensive prompt based on copy details
                 const copyType = selectedCopy?.type || 'professional';
                 const copyText = selectedCopy?.text || '';
+                const tone = selectedCopy?.tone || 'professional';
                 
-                prompt = `Create an abstract ${copyType} marketing background that complements this message: "${copyText.substring(0, 100)}...". Use modern, clean design elements that enhance readability without being distracting.`;
-                console.log('✅ Using generated default prompt:', prompt);
+                // Extract headline (first line) and supporting text
+                const lines = copyText.split('\n').filter(line => line.trim());
+                const headline = lines[0] || '';
+                const supportingText = lines.slice(1).join(' ').substring(0, 80);
+                
+                prompt = `${copyType}なマーケティング背景を作成してください。
+
+マーケティングコピー情報:
+- メインメッセージ: "${headline}"
+- サポートテキスト: "${supportingText}${supportingText ? '...' : ''}"
+- コピータイプ: ${copyType}
+
+視覚的要件:
+- ${tone}で${copyType}な雰囲気を表現
+- テキストオーバーレイの読みやすさを最適化
+- メッセージの感情的アピールをサポートするビジュアルスタイル
+- 抽象的パターン、テクスチャ、幾何学的形状
+- テキストと競合しない洗練された配色
+- プロフェッショナルなマーケティング素材の美観
+- 文字、ロゴ、特定のブランド要素は含めない`;
+                
+                console.log('✅ Using generated comprehensive prompt:', prompt);
             }
             
             promptText.value = prompt;

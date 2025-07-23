@@ -33,11 +33,36 @@ def _extract_image_bytes(img_obj) -> bytes:
     Works for gpt-image-1 (.b64_json) and DALL-E (.url).
     """
     if getattr(img_obj, "b64_json", None):
-        return base64.b64decode(img_obj.b64_json)
+        b64_data = img_obj.b64_json
+        logger.info(f"Extracting base64 image data (length: {len(b64_data)} chars)")
+        
+        if not b64_data.strip():
+            raise RuntimeError("Empty base64 data received from gpt-image-1")
+        
+        try:
+            decoded_bytes = base64.b64decode(b64_data)
+            logger.info(f"Successfully decoded base64 to {len(decoded_bytes)} bytes")
+            
+            if len(decoded_bytes) == 0:
+                raise RuntimeError("Decoded image data is empty")
+                
+            return decoded_bytes
+        except Exception as e:
+            logger.error(f"Failed to decode base64 image data: {e}")
+            raise RuntimeError(f"Base64 decode error: {e}")
+    
     if getattr(img_obj, "url", None):
-        resp = requests.get(img_obj.url, timeout=30)
+        image_url = img_obj.url
+        logger.info(f"Downloading image from URL: {image_url}")
+        resp = requests.get(image_url, timeout=30)
         resp.raise_for_status()
+        
+        if len(resp.content) == 0:
+            raise RuntimeError("Downloaded image data is empty")
+            
+        logger.info(f"Successfully downloaded {len(resp.content)} bytes from URL")
         return resp.content
+    
     raise RuntimeError("No image payload in response")
 
 
@@ -127,17 +152,27 @@ def generate_ai_background_with_stored_prompt(copy_content: Dict[str, Any], prod
             logger.warning("No background prompt found in copy content, falling back to basic generation")
             return generate_ai_background(copy_content, product)
         
-        # Enhance the stored prompt with technical requirements for DALL-E
+        # Get additional copy details for context
+        full_text = copy_content.get('text', '')
+        tone = copy_content.get('tone', 'professional')
+        
+        # Enhance the stored prompt with comprehensive copy context and technical requirements
         enhanced_prompt = f"""
         {background_prompt}
+        
+        MARKETING COPY CONTEXT:
+        - Headline: "{headline[:50]}"
+        - Full marketing message: "{full_text[:100]}..."
+        - Copy type: {copy_type}
+        - Desired tone: {tone}
         
         TECHNICAL REQUIREMENTS:
         - Composition optimized for text overlay readability
         - Professional marketing material aesthetic
         - 1024x1024 resolution optimized
         - No text, logos, or specific branded elements
-        - Colors and mood should complement the message: "{headline[:50]}"
-        - Suitable for {copy_type} marketing approach
+        - Colors and mood should complement the {copy_type} marketing message with a {tone} tone
+        - Visual style should enhance and support the marketing copy's message and emotional appeal
         """.strip()
         
         logger.info(f"Generating AI background using stored prompt for {copy_type} copy")
@@ -157,7 +192,17 @@ def generate_ai_background_with_stored_prompt(copy_content: Dict[str, Any], prod
             
             # Extract image bytes (Base64 for gpt-image-1, URL for DALL-E)
             img_bytes = _extract_image_bytes(response.data[0])
-            logger.info(f"Successfully generated AI background using gpt-image-1")
+            
+            # Validate image data
+            if not img_bytes or len(img_bytes) == 0:
+                raise RuntimeError("Generated image data is empty")
+            
+            # Basic PNG validation (PNG files start with specific bytes)
+            if not img_bytes.startswith(b'\x89PNG'):
+                logger.warning("Generated data doesn't appear to be a valid PNG file")
+                # Don't fail here, as it might still be valid image data in another format
+            
+            logger.info(f"Successfully generated AI background using gpt-image-1 ({len(img_bytes)} bytes)")
             return img_bytes
             
         except Exception as gpt_image_error:
@@ -213,12 +258,15 @@ def generate_ai_background(copy_content: Dict[str, Any], product) -> Optional[by
         headline = copy_content.get('headline', '')
         subline = copy_content.get('subline', '')
         cta = copy_content.get('cta', '')
+        full_text = copy_content.get('text', '')
+        copy_type = copy_content.get('type', 'neutral')
+        tone = copy_content.get('tone', 'professional')
         
         # Build a descriptive prompt for the background
         prompt_parts = []
         
-        # Analyze copy to determine style and mood
-        copy_text = f"{headline} {subline} {cta}".lower()
+        # Analyze copy to determine style and mood - use full text for better context
+        copy_text = f"{headline} {subline} {cta} {full_text}".lower()
         
         # Determine background style based on copy content
         if any(word in copy_text for word in ['luxury', 'premium', 'elegant', 'sophisticated']):
@@ -234,17 +282,26 @@ def generate_ai_background(copy_content: Dict[str, Any], product) -> Optional[by
         else:
             style = "clean, professional with subtle patterns and balanced composition"
         
-        # Create the AI prompt
+        # Create the AI prompt with comprehensive copy context
         background_prompt = f"""
         Create an abstract background image suitable for a marketing banner with the following characteristics:
+        
+        MARKETING CONTEXT:
+        - Main headline: "{headline[:50]}"
+        - Supporting message: "{subline[:50]}" 
+        - Call-to-action: "{cta[:30]}"
+        - Copy type: {copy_type}
+        - Desired tone: {tone}
+        
+        VISUAL REQUIREMENTS:
         - Style: {style}
-        - Mood: Professional yet engaging, suitable for the marketing message "{headline}"
+        - Mood: {tone} yet engaging, complementing the {copy_type} marketing message
         - Composition: Abstract patterns, textures, or geometric shapes that won't compete with text overlay
-        - Color harmony: Balanced and sophisticated color palette
+        - Color harmony: Balanced and sophisticated palette that enhances the marketing message
         - Focus: Background should be subtle enough to allow text to be readable when overlaid
         - No text, logos, or specific objects - purely abstract background patterns
         - High quality, professional marketing material aesthetic
-        - Suitable for banner advertising format
+        - Visual style should support and amplify the emotional appeal of the copy
         """.strip()
         
         logger.info(f"Generating AI background with prompt: {background_prompt[:100]}...")
@@ -264,7 +321,17 @@ def generate_ai_background(copy_content: Dict[str, Any], product) -> Optional[by
             
             # Extract image bytes (Base64 for gpt-image-1, URL for DALL-E)
             img_bytes = _extract_image_bytes(response.data[0])
-            logger.info("Successfully generated AI background image using gpt-image-1")
+            
+            # Validate image data
+            if not img_bytes or len(img_bytes) == 0:
+                raise RuntimeError("Generated image data is empty")
+            
+            # Basic PNG validation (PNG files start with specific bytes)
+            if not img_bytes.startswith(b'\x89PNG'):
+                logger.warning("Generated data doesn't appear to be a valid PNG file")
+                # Don't fail here, as it might still be valid image data in another format
+            
+            logger.info(f"Successfully generated AI background image using gpt-image-1 ({len(img_bytes)} bytes)")
             return img_bytes
             
         except Exception as gpt_image_error:
