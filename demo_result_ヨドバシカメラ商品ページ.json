@@ -1,0 +1,31 @@
+{
+  "url": "https://www.yodobashi.com/product/100000001005807664/",
+  "llm_extracted_data": {
+    "product_name": "神明 無洗米新潟県産こしひかり 2kg 令和6年産",
+    "product_description": "独特の甘みと粘りがあり、炊きあがりの香りもよく、見た目もつややか。新潟という米つくり最高の環境で育てられたお米です。",
+    "key_features": [
+      "無洗米",
+      "新潟県産",
+      "こしひかり",
+      "2kg",
+      "令和6年産"
+    ],
+    "price_info": "￥2,300",
+    "brand_name": "神明",
+    "category": "食品＆飲料・お酒 > 米・穀類 > 無洗米",
+    "availability": "在庫あり",
+    "reviews_sentiment": "3."
+  },
+  "extraction_method": "requests",
+  "confidence": 1.0,
+  "timestamp": 1753551337.2237809,
+  "model_used": "gemini-2.5-flash-lite",
+  "preprocessed_data_file": "preprocessed_fb270438b7e9.txt",
+  "performance_metrics": {
+    "html_fetch_time": 8.12736964225769,
+    "preprocessing_time": 0.03391671180725098,
+    "llm_processing_time": 0.9909994602203369,
+    "total_time": 9.152285814285278,
+    "data_compression_ratio": "95.5%"
+  }
+}

@@ -13,7 +13,7 @@ from playwright.async_api import async_playwright, Page, Browser
 from selectolax.parser import HTMLParser
 import logging
 
-from .scraper_config import ScraperConfig
+from scraper_config import ScraperConfig
 
 logger = logging.getLogger(__name__)
 

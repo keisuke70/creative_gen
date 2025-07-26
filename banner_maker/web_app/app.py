@@ -24,6 +24,7 @@ import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.lp_scrape import scrape_landing_page, get_page_title_and_description
+from src.llm_scraper import scrape_page_with_llm
 from src.gpt_image import generate_unified_creative
 from src.copy_gen import generate_copy_and_visual_prompts, select_best_copy_for_banner
 from src.canva_oauth import init_canva_oauth, get_authenticated_api, require_canva_auth
@@ -54,6 +55,9 @@ generation_results = {}
 
 # Cache for scraping results (persists until page refresh)
 scraping_cache = {}
+
+# Get Google API key for LLM scraping
+GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY')
 
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
 
@@ -212,6 +216,74 @@ def get_cached_copy_data(url):
             'best_copy': cached_data['best_copy']
         }
     return None
+
+
+async def scrape_with_llm_fallback(url: str, use_llm: bool = True) -> tuple:
+    """
+    Enhanced scraping function that uses LLM by default with fallback to traditional scraping
+    
+    Args:
+        url: URL to scrape
+        use_llm: Whether to attempt LLM scraping first
+        
+    Returns:
+        tuple: (lp_data, page_meta, used_llm_flag)
+    """
+    logger.info(f"Starting scraping for {url} with LLM={'enabled' if use_llm else 'disabled'}")
+    
+    if use_llm and GOOGLE_API_KEY:
+        try:
+            # Attempt LLM-enhanced scraping
+            logger.info(f"Attempting LLM-enhanced scraping for {url}")
+            llm_result = await scrape_page_with_llm(url, GOOGLE_API_KEY)
+            
+            # Check if LLM extraction was successful
+            if (llm_result.get('llm_extraction', {}).get('extraction_confidence', 0) > 0.5 and
+                llm_result.get('text_content')):
+                
+                # LLM scraping successful - format for compatibility
+                lp_data = {
+                    'text_content': llm_result['text_content'],
+                    'images': llm_result.get('images', []),
+                    'has_viable_image': llm_result.get('has_viable_image', False),
+                    'hero_image_data': llm_result.get('hero_image_data'),
+                    'llm_extraction': llm_result.get('llm_extraction'),
+                    'extraction_method': 'llm'
+                }
+                
+                page_meta = llm_result.get('metadata', {})
+                # Ensure required fields exist
+                if 'title' not in page_meta:
+                    page_meta['title'] = llm_result.get('llm_extraction', {}).get('llm_extracted_data', {}).get('product_name', 'Page')
+                if 'description' not in page_meta:
+                    page_meta['description'] = llm_result.get('llm_extraction', {}).get('llm_extracted_data', {}).get('product_description', '')
+                
+                logger.info(f"LLM scraping successful for {url} with confidence {llm_result.get('llm_extraction', {}).get('extraction_confidence', 0):.2f}")
+                return lp_data, page_meta, True
+                
+            else:
+                logger.warning(f"LLM scraping returned low confidence results for {url}, falling back to traditional scraping")
+                
+        except Exception as e:
+            logger.error(f"LLM scraping failed for {url}: {e}")
+            logger.info("Falling back to traditional scraping...")
+    
+    # Fallback to traditional scraping
+    try:
+        logger.info(f"Using traditional scraping for {url}")
+        lp_data = await scrape_landing_page(url)
+        page_meta = await get_page_title_and_description(url)
+        
+        # Add extraction method marker
+        if isinstance(lp_data, dict):
+            lp_data['extraction_method'] = 'traditional'
+        
+        logger.info(f"Traditional scraping successful for {url}")
+        return lp_data, page_meta, False
+        
+    except Exception as e:
+        logger.error(f"Traditional scraping also failed for {url}: {e}")
+        raise e
 
 
 @app.route('/')
@@ -1457,6 +1529,58 @@ def add_background_to_design():
             
     except Exception as e:
         logger.error(f"Error adding background to design: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/scrape-llm', methods=['POST'])
+def scrape_with_llm_endpoint():
+    """API endpoint for LLM-enhanced web scraping"""
+    try:
+        data = request.get_json()
+        url = data.get('url')
+        use_llm = data.get('use_llm', True)
+        
+        if not url:
+            return jsonify({'error': 'URL is required'}), 400
+        
+        # Check cache first
+        cached_data = get_cached_scraping_data(url)
+        if cached_data:
+            logger.info(f"Returning cached data for {url}")
+            return jsonify({
+                'cached': True,
+                'lp_data': cached_data['lp_data'],
+                'page_meta': cached_data['page_meta'],
+                'extraction_method': cached_data['lp_data'].get('extraction_method', 'unknown')
+            })
+        
+        # Perform scraping
+        import asyncio
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        try:
+            lp_data, page_meta, used_llm = loop.run_until_complete(
+                scrape_with_llm_fallback(url, use_llm)
+            )
+            
+            # Cache the results
+            cache_scraping_data(url, lp_data, page_meta)
+            
+            return jsonify({
+                'cached': False,
+                'lp_data': lp_data,
+                'page_meta': page_meta,
+                'extraction_method': lp_data.get('extraction_method', 'unknown'),
+                'used_llm': used_llm,
+                'llm_extraction': lp_data.get('llm_extraction') if used_llm else None
+            })
+            
+        finally:
+            loop.close()
+            
+    except Exception as e:
+        logger.error(f"LLM scraping endpoint error: {e}")
         return jsonify({'error': str(e)}), 500
 
 
