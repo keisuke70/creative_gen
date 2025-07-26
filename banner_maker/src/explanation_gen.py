@@ -4,7 +4,8 @@ AI-powered insights for advertising creative development
 """
 
 import os
-import openai
+from google import genai
+from google.genai import types
 import re
 from typing import Dict, List
 from urllib.parse import urlparse
@@ -28,8 +29,8 @@ def generate_creative_explanation(text_content: str, title: str, description: st
     domain = urlparse(url).netloc.replace('www.', '')
     brand_context = _extract_brand_context(domain, title, text_content)
     
-    # Generate the explanation using OpenAI - Japanese prompt to ensure Japanese output
-    prompt = f"""このランディングページのコンテンツを分析し、効果的な広告クリエイティブ制作のためのインサイトを日本語で提供してください。必ず日本語のみで回答すること。
+    # Generate the explanation using Gemini - Japanese prompt to ensure Japanese output
+    prompt = f"""以下のランディングページを分析し、広告クリエイティブ制作のインサイトを提供してください。
 
 ページ情報:
 - URL: {url}
@@ -37,43 +38,85 @@ def generate_creative_explanation(text_content: str, title: str, description: st
 - 説明: {description}
 - コンテンツ: {text_content[:800]}...
 
-以下の構成で分析結果を日本語で提供してください:
+以下の構成で分析結果を出力してください:
 
-1. **商品・サービス概要** (2文程度)
-2. **ターゲットオーディエンス** (3つのポイント)
-3. **主要セールスポイント** (3-4つのポイント)
-4. **クリエイティブ方向性** (3つのポイント)
-5. **メッセージング戦略** (2-3つのポイント)
-6. **CTA提案** (2-3つの選択肢)
+<h3>商品・サービス概要</h3>
+<p>[2文程度で商品・サービスの概要を説明]</p>
 
-HTMLフォーマットで出力し、<h3>でセクション見出し、<ul><li>でポイント、<p>で段落を使用してください。実用的で実行可能な内容にしてください。必ず日本語で回答すること。"""
+<h3>ターゲットオーディエンス</h3>
+<ul>
+<li>[第1のターゲット層]</li>
+<li>[第2のターゲット層]</li>
+<li>[第3のターゲット層]</li>
+</ul>
+
+<h3>主要セールスポイント</h3>
+<ul>
+<li>[セールスポイント1]</li>
+<li>[セールスポイント2]</li>
+<li>[セールスポイント3]</li>
+<li>[セールスポイント4]</li>
+</ul>
+
+<h3>クリエイティブ方向性</h3>
+<ul>
+<li>[クリエイティブ方向性1]</li>
+<li>[クリエイティブ方向性2]</li>
+<li>[クリエイティブ方向性3]</li>
+</ul>
+
+<h3>メッセージング戦略</h3>
+<ul>
+<li>[メッセージング戦略1]</li>
+<li>[メッセージング戦略2]</li>
+<li>[メッセージング戦略3]</li>
+</ul>
+
+<h3>CTA提案</h3>
+<ul>
+<li>[CTA案1]</li>
+<li>[CTA案2]</li>
+<li>[CTA案3]</li>
+</ul>
+
+上記の構造を厳密に守り、HTMLタグのみで出力してください。"""
 
     try:
-        # Use same client setup as copy_gen.py
-        client = openai.OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
+        # Use Gemini client setup
+        api_key = os.getenv('GOOGLE_API_KEY')
+        if not api_key:
+            raise ValueError("GOOGLE_API_KEY environment variable not set")
+        client = genai.Client(api_key=api_key)
 
-        models_to_try = ["gpt-4.1-mini", "gpt-4.1", "gpt-4.1-nano", "gpt-4o-mini"]
-        
-        response = None
-        for model in models_to_try:
-            try:
-                response = client.chat.completions.create(
-                    model=model,
-                    messages=[
-                        {"role": "system", "content": "あなたは広告心理学と消費者行動に詳しい日本のマーケティング戦略家です。必ず日本語でのみ回答してください。"},
-                        {"role": "user", "content": prompt}
-                    ],
+        try:
+            response = client.models.generate_content(
+                model="gemini-2.5-flash-lite",
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    system_instruction="マーケティング専門家として、指定されたHTML構造に従って日本語で分析結果を出力してください。余計な前置きや挨拶は不要です。",
+                    temperature=0.7,
+                    max_output_tokens=2000
                 )
-                break
-            except Exception as model_error:
-                print(f"Model {model} failed: {model_error}")
-                continue
+            )
+        except Exception as model_error:
+            print(f"Gemini API failed: {model_error}")
+            response = None
         
         if response is None:
             print("All models failed, using fallback explanation")
             return _generate_fallback_explanation(text_content, title, description, brand_context)
         
-        explanation_html = response.choices[0].message.content.strip()
+        explanation_html = response.text.strip()
+        
+        # Remove markdown code block markers if present
+        if explanation_html.startswith('```html'):
+            explanation_html = explanation_html[7:]  # Remove ```html
+        if explanation_html.startswith('```'):
+            explanation_html = explanation_html[3:]  # Remove ```
+        if explanation_html.endswith('```'):
+            explanation_html = explanation_html[:-3]  # Remove trailing ```
+        
+        explanation_html = explanation_html.strip()
         
         # Extract key metrics and insights for structured data
         insights = _extract_key_insights(text_content, explanation_html)
@@ -89,7 +132,7 @@ HTMLフォーマットで出力し、<h3>でセクション見出し、<ul><li>�
         
     except Exception as e:
         print(f"Explanation generation failed: {e}")
-        # Fallback explanation if OpenAI fails
+        # Fallback explanation if Gemini fails
         return _generate_fallback_explanation(text_content, title, description, brand_context)
 
 
@@ -173,7 +216,7 @@ def _extract_creative_direction(explanation_html: str) -> List[str]:
 
 
 def _generate_fallback_explanation(text_content: str, title: str, description: str, brand_context: str) -> Dict:
-    """Generate fallback explanation when OpenAI is unavailable"""
+    """Generate fallback explanation when Gemini is unavailable"""
     
     # Analyze content for basic insights
     has_pricing = bool(re.search(r'[\$¥€£]\s*\d+|price|pricing|cost', text_content.lower()))

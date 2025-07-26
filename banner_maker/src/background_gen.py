@@ -2,81 +2,185 @@
 """
 Background generator utility for Canva banners.
 
-Creates AI-generated background images tailored to marketing copy content,
-with gradient fallback when AI generation fails.
+Creates AI-generated background images with user-specified prompts and banner sizes.
 """
 
 import os
 import tempfile
 import logging
-import requests
-import base64
-from typing import Optional, List, Dict, Any
+from typing import Optional, List
 from PIL import Image, ImageDraw
 from dotenv import load_dotenv
-import openai
-from io import BytesIO
+from google import genai
+from google.genai import types
 
-from .canva_api import CanvaAPI, CanvaAPIError
+from .canva_api import CanvaAPI
 
 # Load environment variables from .env file in parent directory
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '..', '..', '.env'))
 
-
 logger = logging.getLogger(__name__)
 
 
-def _extract_image_bytes(img_obj) -> bytes:
+def get_aspect_ratio_for_banner_size(banner_size: str) -> str:
     """
-    Accepts a single item from response.data and returns raw bytes.
+    Map banner size to closest Gemini-supported aspect ratio.
     
-    Works for gpt-image-1 (.b64_json) and DALL-E (.url).
-    """
-    if getattr(img_obj, "b64_json", None):
-        b64_data = img_obj.b64_json
-        logger.info(f"Extracting base64 image data (length: {len(b64_data)} chars)")
-        
-        if not b64_data.strip():
-            raise RuntimeError("Empty base64 data received from gpt-image-1")
-        
-        try:
-            decoded_bytes = base64.b64decode(b64_data)
-            logger.info(f"Successfully decoded base64 to {len(decoded_bytes)} bytes")
-            
-            if len(decoded_bytes) == 0:
-                raise RuntimeError("Decoded image data is empty")
-                
-            return decoded_bytes
-        except Exception as e:
-            logger.error(f"Failed to decode base64 image data: {e}")
-            raise RuntimeError(f"Base64 decode error: {e}")
-    
-    if getattr(img_obj, "url", None):
-        image_url = img_obj.url
-        logger.info(f"Downloading image from URL: {image_url}")
-        resp = requests.get(image_url, timeout=30)
-        resp.raise_for_status()
-        
-        if len(resp.content) == 0:
-            raise RuntimeError("Downloaded image data is empty")
-            
-        logger.info(f"Successfully downloaded {len(resp.content)} bytes from URL")
-        return resp.content
-    
-    raise RuntimeError("No image payload in response")
-
-
-def maybe_generate_background(product, copy_content: Optional[Dict[str, Any]] = None, api: Optional[CanvaAPI] = None) -> Optional[str]:
-    """
-    Generate an AI background image tailored to the marketing copy, with gradient fallback.
+    Gemini supports: "1:1", "3:4", "4:3", "9:16", and "16:9"
     
     Args:
-        product: Product object with palette attribute
-        copy_content: Dictionary with headline, subline, and cta text for AI prompt generation
-        api: Authenticated Canva API instance
+        banner_size: Banner size identifier from UI
         
     Returns:
-        Canva asset ID if successful, None if failure
+        Aspect ratio string supported by Gemini
+    """
+    # Banner size to dimensions mapping
+    size_dimensions = {
+        "MD_RECT": (300, 250),      # 1.2:1 -> closest to 4:3
+        "LG_RECT": (336, 280),      # 1.2:1 -> closest to 4:3  
+        "LEADERBOARD": (728, 90),   # 8.1:1 -> closest to 16:9
+        "HALF_PAGE": (300, 600),    # 1:2 -> closest to 9:16
+        "WIDE_SKYSCRAPER": (160, 600), # 1:3.75 -> closest to 9:16
+        "FB_RECT_1": (1200, 628),   # 1.91:1 -> closest to 16:9
+        "FB_SQUARE": (1200, 1200)   # 1:1 -> exact match 1:1
+    }
+    
+    if banner_size not in size_dimensions:
+        logger.warning(f"Unknown banner size: {banner_size}, defaulting to 1:1")
+        return "1:1"
+    
+    width, height = size_dimensions[banner_size]
+    ratio = width / height
+    
+    # Map to closest supported aspect ratio
+    if ratio >= 1.6:  # Wide formats
+        return "16:9"
+    elif ratio >= 1.25:  # Medium wide
+        return "4:3"
+    elif ratio >= 0.9:  # Square-ish
+        return "1:1"
+    elif ratio >= 0.7:  # Portrait
+        return "3:4"
+    else:  # Tall portrait
+        return "9:16"
+
+
+def translate_prompt_to_english(japanese_prompt: str, client) -> str:
+    """
+    Translate Japanese prompt to English using Gemini.
+    
+    Args:
+        japanese_prompt: Japanese prompt to translate
+        client: Gemini client instance
+        
+    Returns:
+        English translation of the prompt
+    """
+    try:
+        translation_prompt = f"""Translate the following Japanese text to English for use in an AI image generation prompt. Keep it concise and descriptive for image generation:
+
+{japanese_prompt}
+
+English translation:"""
+
+        response = client.models.generate_content(
+            model="gemini-2.5-flash-lite",
+            contents=translation_prompt,
+            config=types.GenerateContentConfig(
+                temperature=0.3,
+                max_output_tokens=500
+            )
+        )
+        
+        english_prompt = response.text.strip()
+        return english_prompt
+        
+    except Exception as e:
+        logger.warning(f"Translation failed: {e}, using original prompt")
+        return japanese_prompt
+
+
+def generate_ai_background(prompt: str, banner_size: str = "FB_SQUARE") -> Optional[List[bytes]]:
+    """
+    Generate 3 AI background images using Gemini Imagen.
+    Translates Japanese prompts to English for better image generation results.
+    
+    Args:
+        prompt: User-provided prompt for background generation (Japanese or English)
+        banner_size: Banner size identifier for aspect ratio determination
+        
+    Returns:
+        List of PNG image data as bytes, or None if generation fails
+    """
+    try:
+        # Set up Gemini client
+        api_key = os.getenv("GOOGLE_API_KEY")
+        if not api_key:
+            logger.warning("No GOOGLE_API_KEY found for AI background generation")
+            return None
+        
+        client = genai.Client(api_key=api_key)
+        
+        # Translate Japanese prompt to English for better image generation
+        english_prompt = translate_prompt_to_english(prompt, client)
+        
+        # Get aspect ratio based on banner size
+        aspect_ratio = get_aspect_ratio_for_banner_size(banner_size)
+        
+        
+        
+        # Generate image with Gemini's Imagen model
+        try:
+            logger.info("Attempting background generation with imagen-4.0-generate-preview-06-06")
+            response = client.models.generate_images(
+                model="imagen-4.0-generate-preview-06-06",
+                prompt=english_prompt,
+                config=types.GenerateImagesConfig(
+                    number_of_images=3,
+                    output_mime_type="image/png",
+                    aspect_ratio=aspect_ratio
+                )
+            )
+            
+            # Extract all image data from response
+            images_data = []
+            for i, generated_image in enumerate(response.generated_images):
+                img_bytes = generated_image.image.image_bytes
+                
+                # Validate image data
+                if not img_bytes or len(img_bytes) == 0:
+                    logger.warning(f"Generated image {i+1} data is empty, skipping")
+                    continue
+                    
+                images_data.append(img_bytes)
+            
+            if not images_data:
+                raise RuntimeError("No valid image data generated")
+            
+            logger.info(f"Successfully generated {len(images_data)} AI background images using imagen-4.0-generate-preview-06-06")
+            return images_data
+            
+        except Exception as imagen_error:
+            logger.error(f"Imagen generation failed: {imagen_error}")
+            return None
+            
+    except Exception as e:
+        logger.warning(f"AI background generation failed: {e}")
+        return None
+
+
+def maybe_generate_background(prompt: str, banner_size: str, api: Optional[CanvaAPI] = None, palette: Optional[List[str]] = None) -> Optional[List[str]]:
+    """
+    Generate 3 AI background images or gradient fallback and upload to Canva.
+    
+    Args:
+        prompt: User-provided prompt for background generation
+        banner_size: Banner size identifier for aspect ratio determination
+        api: Authenticated Canva API instance
+        palette: Fallback color palette for gradient generation
+        
+    Returns:
+        List of Canva asset IDs if successful, None if failure
     """
     # Get authenticated API
     if api is None:
@@ -87,26 +191,31 @@ def maybe_generate_background(product, copy_content: Optional[Dict[str, Any]] = 
             return None
     
     try:
-        # Try AI background generation first if copy content is available
-        if copy_content and copy_content.get('headline'):
-            logger.info("Attempting AI background generation based on copy content")
-            ai_background_data = generate_ai_background(copy_content, product)
+        # Try AI background generation first
+        if prompt and prompt.strip():
+            logger.info("Attempting AI background generation based on user prompt")
+            ai_background_images = generate_ai_background(prompt.strip(), banner_size)
             
-            if ai_background_data:
-                asset_id = api.upload_binary(
-                    ai_background_data,
-                    "ai_background.png",
-                    "image/png"
-                )
-                logger.info(f"Generated AI background: {asset_id}")
-                return asset_id
+            if ai_background_images:
+                asset_ids = []
+                for i, ai_background_data in enumerate(ai_background_images):
+                    asset_id = api.upload_binary(
+                        ai_background_data,
+                        f"ai_background_{i+1}.png",
+                        "image/png"
+                    )
+                    asset_ids.append(asset_id)
+                    logger.info(f"Generated AI background {i+1}: {asset_id}")
+                
+                logger.info(f"Generated {len(asset_ids)} AI backgrounds total")
+                return asset_ids
             else:
                 logger.warning("AI background generation failed, falling back to gradient")
         
-        # Fallback to gradient if no copy content or AI generation failed
-        if hasattr(product, 'palette') and product.palette:
+        # Fallback to gradient if AI generation failed or no prompt
+        if palette:
             logger.info("Generating gradient background as fallback")
-            gradient_data = create_gradient_image(product.palette)
+            gradient_data = create_gradient_image(palette)
             
             asset_id = api.upload_binary(
                 gradient_data,
@@ -115,255 +224,13 @@ def maybe_generate_background(product, copy_content: Optional[Dict[str, Any]] = 
             )
             
             logger.info(f"Generated gradient background: {asset_id}")
-            return asset_id
+            return [asset_id]  # Return as list for consistency
         else:
             logger.info("No color palette available, skipping background generation")
             return None
         
     except Exception as e:
         logger.warning(f"Background generation failed: {e}")
-        return None
-
-
-def generate_ai_background_with_stored_prompt(copy_content: Dict[str, Any], product) -> Optional[bytes]:
-    """
-    Generate AI background image using the pre-generated prompt from copy generation.
-    
-    Args:
-        copy_content: Dictionary containing headline, background_prompt, and other copy data
-        product: Product object for additional context (mainly for fallback)
-        
-    Returns:
-        PNG image data as bytes, or None if generation fails
-    """
-    try:
-        # Set up OpenAI client
-        openai_api_key = os.getenv("OPENAI_API_KEY")
-        if not openai_api_key:
-            logger.warning("No OpenAI API key found for AI background generation")
-            return None
-        
-        # Extract the pre-generated background prompt
-        background_prompt = copy_content.get('background_prompt', '')
-        copy_type = copy_content.get('type', 'neutral')
-        headline = copy_content.get('headline', copy_content.get('text', ''))
-        
-        if not background_prompt:
-            logger.warning("No background prompt found in copy content, falling back to basic generation")
-            return generate_ai_background(copy_content, product)
-        
-        # Get additional copy details for context
-        full_text = copy_content.get('text', '')
-        tone = copy_content.get('tone', 'professional')
-        
-        # Enhance the stored prompt with comprehensive copy context and technical requirements
-        enhanced_prompt = f"""
-        {background_prompt}
-        
-        MARKETING COPY CONTEXT:
-        - Headline: "{headline[:50]}"
-        - Full marketing message: "{full_text[:100]}..."
-        - Copy type: {copy_type}
-        - Desired tone: {tone}
-        
-        TECHNICAL REQUIREMENTS:
-        - Composition optimized for text overlay readability
-        - Professional marketing material aesthetic
-        - 1024x1024 resolution optimized
-        - No text, logos, or specific branded elements
-        - Colors and mood should complement the {copy_type} marketing message with a {tone} tone
-        - Visual style should enhance and support the marketing copy's message and emotional appeal
-        """.strip()
-        
-        logger.info(f"Generating AI background using stored prompt for {copy_type} copy")
-        
-        # Generate image with OpenAI gpt-image-1 (preferred) with DALL-E fallback
-        client = openai.OpenAI(api_key=openai_api_key)
-        
-        # Try gpt-image-1 first
-        try:
-            logger.info("Attempting background generation with gpt-image-1")
-            response = client.images.generate(
-                model="gpt-image-1",
-                prompt=enhanced_prompt,
-                size="1024x1024",
-                n=1
-            )
-            
-            # Extract image bytes (Base64 for gpt-image-1, URL for DALL-E)
-            img_bytes = _extract_image_bytes(response.data[0])
-            
-            # Validate image data
-            if not img_bytes or len(img_bytes) == 0:
-                raise RuntimeError("Generated image data is empty")
-            
-            # Basic PNG validation (PNG files start with specific bytes)
-            if not img_bytes.startswith(b'\x89PNG'):
-                logger.warning("Generated data doesn't appear to be a valid PNG file")
-                # Don't fail here, as it might still be valid image data in another format
-            
-            logger.info(f"Successfully generated AI background using gpt-image-1 ({len(img_bytes)} bytes)")
-            return img_bytes
-            
-        except Exception as gpt_image_error:
-            logger.warning(f"gpt-image-1 failed: {gpt_image_error}, falling back to DALL-E-3")
-            
-            # Fallback to DALL-E-3
-            try:
-                response = client.images.generate(
-                    model="dall-e-3",
-                    prompt=enhanced_prompt,
-                    size="1024x1024",
-                    quality="standard",
-                    n=1
-                )
-                
-                # Download the generated image (DALL-E uses URLs)
-                image_url = response.data[0].url
-                image_response = requests.get(image_url, timeout=30)
-                
-                if image_response.status_code == 200:
-                    logger.info(f"Successfully generated AI background using DALL-E-3 fallback")
-                    return image_response.content
-                else:
-                    logger.error(f"Failed to download DALL-E generated image: {image_response.status_code}")
-                    return None
-                    
-            except Exception as dalle_error:
-                logger.error(f"Both gpt-image-1 and DALL-E-3 failed: {dalle_error}")
-                return None
-            
-    except Exception as e:
-        logger.warning(f"AI background generation with stored prompt failed: {e}")
-
-def generate_ai_background(copy_content: Dict[str, Any], product) -> Optional[bytes]:
-    """
-    Generate AI background image using OpenAI DALL-E based on marketing copy content.
-    
-    Args:
-        copy_content: Dictionary containing headline, subline, cta
-        product: Product object for additional context
-        
-    Returns:
-        PNG image data as bytes, or None if generation fails
-    """
-    try:
-        # Set up OpenAI client
-        openai_api_key = os.getenv("OPENAI_API_KEY")
-        if not openai_api_key:
-            logger.warning("No OpenAI API key found for AI background generation")
-            return None
-        
-        # Create contextual prompt for background generation
-        headline = copy_content.get('headline', '')
-        subline = copy_content.get('subline', '')
-        cta = copy_content.get('cta', '')
-        full_text = copy_content.get('text', '')
-        copy_type = copy_content.get('type', 'neutral')
-        tone = copy_content.get('tone', 'professional')
-        
-        # Build a descriptive prompt for the background
-        prompt_parts = []
-        
-        # Analyze copy to determine style and mood - use full text for better context
-        copy_text = f"{headline} {subline} {cta} {full_text}".lower()
-        
-        # Determine background style based on copy content
-        if any(word in copy_text for word in ['luxury', 'premium', 'elegant', 'sophisticated']):
-            style = "luxury, elegant, sophisticated with gold accents and premium textures"
-        elif any(word in copy_text for word in ['tech', 'digital', 'ai', 'innovation', 'modern']):
-            style = "modern, tech-inspired with clean geometric patterns and digital aesthetics"
-        elif any(word in copy_text for word in ['nature', 'organic', 'natural', 'eco', 'green']):
-            style = "natural, organic with soft textures and earth tones"
-        elif any(word in copy_text for word in ['energy', 'power', 'strong', 'dynamic', 'bold']):
-            style = "dynamic, energetic with bold patterns and vibrant colors"
-        elif any(word in copy_text for word in ['comfort', 'cozy', 'home', 'family', 'warm']):
-            style = "warm, comfortable with soft textures and inviting tones"
-        else:
-            style = "clean, professional with subtle patterns and balanced composition"
-        
-        # Create the AI prompt with comprehensive copy context
-        background_prompt = f"""
-        Create an abstract background image suitable for a marketing banner with the following characteristics:
-        
-        MARKETING CONTEXT:
-        - Main headline: "{headline[:50]}"
-        - Supporting message: "{subline[:50]}" 
-        - Call-to-action: "{cta[:30]}"
-        - Copy type: {copy_type}
-        - Desired tone: {tone}
-        
-        VISUAL REQUIREMENTS:
-        - Style: {style}
-        - Mood: {tone} yet engaging, complementing the {copy_type} marketing message
-        - Composition: Abstract patterns, textures, or geometric shapes that won't compete with text overlay
-        - Color harmony: Balanced and sophisticated palette that enhances the marketing message
-        - Focus: Background should be subtle enough to allow text to be readable when overlaid
-        - No text, logos, or specific objects - purely abstract background patterns
-        - High quality, professional marketing material aesthetic
-        - Visual style should support and amplify the emotional appeal of the copy
-        """.strip()
-        
-        logger.info(f"Generating AI background with prompt: {background_prompt[:100]}...")
-        
-        # Generate image with OpenAI gpt-image-1 (preferred) with DALL-E fallback
-        client = openai.OpenAI(api_key=openai_api_key)
-        
-        # Try gpt-image-1 first
-        try:
-            logger.info("Attempting background generation with gpt-image-1")
-            response = client.images.generate(
-                model="gpt-image-1",
-                prompt=background_prompt,
-                size="1024x1024",
-                n=1
-            )
-            
-            # Extract image bytes (Base64 for gpt-image-1, URL for DALL-E)
-            img_bytes = _extract_image_bytes(response.data[0])
-            
-            # Validate image data
-            if not img_bytes or len(img_bytes) == 0:
-                raise RuntimeError("Generated image data is empty")
-            
-            # Basic PNG validation (PNG files start with specific bytes)
-            if not img_bytes.startswith(b'\x89PNG'):
-                logger.warning("Generated data doesn't appear to be a valid PNG file")
-                # Don't fail here, as it might still be valid image data in another format
-            
-            logger.info(f"Successfully generated AI background image using gpt-image-1 ({len(img_bytes)} bytes)")
-            return img_bytes
-            
-        except Exception as gpt_image_error:
-            logger.warning(f"gpt-image-1 failed: {gpt_image_error}, falling back to DALL-E-3")
-            
-            # Fallback to DALL-E-3
-            try:
-                response = client.images.generate(
-                    model="dall-e-3",
-                    prompt=background_prompt,
-                    size="1024x1024",  # Standard size, will be resized as needed
-                    quality="standard",
-                    n=1
-                )
-                
-                # Download the generated image (DALL-E uses URLs)
-                image_url = response.data[0].url
-                image_response = requests.get(image_url, timeout=30)
-                
-                if image_response.status_code == 200:
-                    logger.info("Successfully generated AI background image using DALL-E-3 fallback")
-                    return image_response.content
-                else:
-                    logger.error(f"Failed to download DALL-E generated image: {image_response.status_code}")
-                    return None
-                    
-            except Exception as dalle_error:
-                logger.error(f"Both gpt-image-1 and DALL-E-3 failed: {dalle_error}")
-                return None
-            
-    except Exception as e:
-        logger.warning(f"AI background generation failed: {e}")
         return None
 
 

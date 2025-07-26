@@ -923,76 +923,66 @@ def save_selected_copy():
 @app.route('/api/generate-background', methods=['POST'])
 @require_canva_auth
 def generate_background():
-    """Generate AI background image using stored prompt from copy generation"""
+    """Generate AI background image using user prompt"""
     try:
-        from src.background_gen import generate_ai_background_with_stored_prompt
+        from src.background_gen import generate_ai_background
         
         data = request.get_json()
-        url = data.get('url')
-        selected_copy = data.get('selected_copy')
-        custom_background_prompt = data.get('custom_background_prompt')  # User-edited prompt
+        custom_background_prompt = data.get('custom_background_prompt')  # User-edited prompt from UI
+        banner_size = data.get('banner_size', 'FB_SQUARE')  # Default to square
         
-        if not url or not selected_copy:
-            return jsonify({'error': 'URL and selected copy are required'}), 400
+        if not custom_background_prompt or not custom_background_prompt.strip():
+            return jsonify({'error': 'Background prompt is required'}), 400
         
         # Get authenticated Canva API instance
         api = get_authenticated_api()
         if not api:
             return jsonify({'error': 'Canva authentication required'}), 401
         
-        # Create copy content dictionary with custom or stored background prompt
-        background_prompt = custom_background_prompt or selected_copy.get('background_prompt', '')
+        logger.info(f"🎨 Using background prompt: {custom_background_prompt[:100]}...")
         
-        copy_content = {
-            'headline': selected_copy.get('text', '').split('\n')[0][:50],
-            'text': selected_copy.get('text', ''),
-            'type': selected_copy.get('type', 'neutral'),
-            'tone': selected_copy.get('tone', 'professional'),
-            'background_prompt': background_prompt  # Use custom prompt if provided
-        }
-        
-        logger.info(f"🎨 Using background prompt: {background_prompt[:100]}...")
-        
-        # Create simple product for fallback gradient generation
-        from src.layout_orchestrator import Product
-        product = Product(
-            hero_asset_id=None,
-            palette=['#2C3E50', '#3498DB']  # Default professional colors
-        )
-        
-        # Generate AI background using the stored prompt
+        # Generate AI background using the user prompt
         bg_gen_start = time.time()
-        logger.info("🎨 Generating AI background using LLM-generated prompt from copy generation")
-        ai_background_data = generate_ai_background_with_stored_prompt(copy_content, product)
+        logger.info(f"🎨 Generating AI backgrounds using user prompt (banner size: {banner_size})")
+        ai_background_images = generate_ai_background(custom_background_prompt.strip(), banner_size)
         bg_gen_time = (time.time() - bg_gen_start) * 1000
-        logger.info(f"✅ AI background generated ({bg_gen_time:.1f}ms)")
+        logger.info(f"✅ AI backgrounds generated ({bg_gen_time:.1f}ms)")
         
-        if ai_background_data:
-            # Upload to Canva
+        if ai_background_images:
+            # Upload all images to Canva
             bg_upload_start = time.time()
-            logger.info(f"📤 Starting background upload to Canva ({len(ai_background_data)} bytes)")
-            asset_id = api.upload_binary(
-                ai_background_data,
-                "ai_background.png",
-                "image/png"
-            )
+            asset_ids = []
+            background_urls = []
+            
+            for i, ai_background_data in enumerate(ai_background_images):
+                logger.info(f"📤 Starting background {i+1} upload to Canva ({len(ai_background_data)} bytes)")
+                asset_id = api.upload_binary(
+                    ai_background_data,
+                    f"ai_background_{i+1}.png",
+                    "image/png"
+                )
+                asset_ids.append(asset_id)
+                
+                # Create preview URL with base64 data
+                background_url = "data:image/png;base64," + __import__('base64').b64encode(ai_background_data).decode()
+                background_urls.append(background_url)
+                
+                logger.info(f"✅ Background {i+1} uploaded to Canva: {asset_id}")
+            
             bg_upload_time = (time.time() - bg_upload_start) * 1000
-            logger.info(f"✅ Background uploaded to Canva: {asset_id} ({bg_upload_time:.1f}ms)")
-            
-            logger.info(f"Generated AI background asset: {asset_id}")
-            
-            # For the preview URL, we'll use a placeholder since Canva doesn't provide direct asset URLs
-            # In a real implementation, you might save the image locally for preview
-            background_url = "data:image/png;base64," + __import__('base64').b64encode(ai_background_data).decode()
+            logger.info(f"✅ All {len(asset_ids)} backgrounds uploaded to Canva ({bg_upload_time:.1f}ms)")
             
             return jsonify({
                 'success': True,
-                'background_asset_id': asset_id,
-                'background_url': background_url,
-                'message': 'AI background generated successfully'
+                'background_asset_ids': asset_ids,
+                'background_urls': background_urls,
+                'generation_time_ms': bg_gen_time,
+                'upload_time_ms': bg_upload_time,
+                'count': len(asset_ids),
+                'message': f'{len(asset_ids)} AI backgrounds generated successfully'
             })
         else:
-            return jsonify({'error': 'Failed to generate AI background'}), 500
+            return jsonify({'error': 'Failed to generate AI backgrounds'}), 500
         
     except Exception as e:
         logger.error(f"Background generation error: {e}", exc_info=True)

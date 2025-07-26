@@ -9,7 +9,9 @@ class BannerMaker {
         this.currentTempImage = null; // Track temp images for cleanup
         this.selectedCopy = null; // Track selected copy
         this.copyVariants = []; // Store generated copy variants
-        this.generatedBackgroundId = null; // Track generated background asset ID
+        this.generatedBackgroundIds = null; // Track generated background asset IDs
+        this.selectedBackgroundId = null; // Track selected background asset ID
+        this.selectedBackgroundIndex = null; // Track selected background index
         this.extractedImagePaths = []; // Track extracted images for cleanup after Canva upload
         
         this.initializeEventListeners();
@@ -673,7 +675,7 @@ class BannerMaker {
             url: url,
             size: document.getElementById('bannerSize').value,
             product_image_paths: this.uploadedImages.map(img => img.path), // Send all uploaded images
-            background_asset_id: this.generatedBackgroundId, // Optional
+            background_asset_id: this.selectedBackgroundId, // Optional - selected background
             selected_copy: this.selectedCopy
         };
 
@@ -931,7 +933,9 @@ class BannerMaker {
         // Reset copy state
         this.selectedCopy = null;
         this.copyVariants = [];
-        this.generatedBackgroundId = null;
+        this.generatedBackgroundIds = null;
+        this.selectedBackgroundId = null;
+        this.selectedBackgroundIndex = null;
         this.safeToggleClass('generatedCopySection', 'hidden', true);
         this.safeToggleClass('backgroundSection', 'hidden', true);
         
@@ -1974,6 +1978,11 @@ class BannerMaker {
             if (result.success) {
                 this.copyVariants = result.variants;
                 await this.displayCopyVariants(result.variants);
+                
+                // Show background generation section immediately after copy generation
+                this.showBackgroundSection();
+                this.enableBackgroundGeneration();
+                
                 this.showSuccessMessage(`Generated ${result.variants.length} copy variants`);
             } else {
                 throw new Error(result.error || 'Failed to generate copy');
@@ -2003,8 +2012,12 @@ class BannerMaker {
             return;
         }
 
-        if (!this.selectedCopy) {
-            this.showError('Please select copy first');
+        // Get edited prompt from textarea
+        const promptTextarea = document.getElementById('backgroundPromptText');
+        const customPrompt = promptTextarea?.value?.trim();
+        
+        if (!customPrompt) {
+            this.showError('Please enter a background prompt first');
             return;
         }
 
@@ -2027,9 +2040,9 @@ class BannerMaker {
                 statusDisplay.className = 'w-full px-4 py-3 border border-blue-300 rounded-lg bg-blue-50';
             }
             
-            // Get edited prompt from textarea
-            const promptTextarea = document.getElementById('backgroundPromptText');
-            const customPrompt = promptTextarea?.value?.trim();
+            // Get selected banner size
+            const bannerSizeSelect = document.getElementById('bannerSize');
+            const bannerSize = bannerSizeSelect?.value || 'FB_SQUARE';
             
             // Generate background with custom prompt if available
             const response = await fetch('/api/generate-background', {
@@ -2038,23 +2051,22 @@ class BannerMaker {
                     'Content-Type': 'application/json',
                 },
                 body: JSON.stringify({ 
-                    url: url,
                     custom_background_prompt: customPrompt, // Send edited prompt
-                    selected_copy: this.selectedCopy
+                    banner_size: bannerSize  // Send selected banner size
                 })
             });
 
             const result = await response.json();
 
             if (result.success) {
-                // Store generated background asset ID (already uploaded to Canva)
-                this.generatedBackgroundId = result.background_asset_id;
-                this.showBackgroundPreview(result.background_url);
+                // Store generated background asset IDs (already uploaded to Canva)
+                this.generatedBackgroundIds = result.background_asset_ids;
+                this.showBackgroundPreviews(result.background_urls, result.background_asset_ids);
                 this.updateBackgroundStatus(true);
-                this.showSuccessMessage('AI background generated and uploaded to Canva successfully!');
+                this.showSuccessMessage(`${result.count} AI backgrounds generated and uploaded to Canva successfully!`);
                 this.checkIfReadyForBannerGeneration();
             } else {
-                throw new Error(result.error || 'Failed to generate background');
+                throw new Error(result.error || 'Failed to generate backgrounds');
             }
 
         } catch (error) {
@@ -2071,48 +2083,17 @@ class BannerMaker {
     }
     
     async sendBackgroundToCanva() {
-        if (!this.generatedBackgroundPath) {
-            this.showError('No background generated yet. Please generate a background first.');
+        // Since backgrounds are automatically uploaded, this just shows confirmation
+        if (!this.generatedBackgroundIds || this.generatedBackgroundIds.length === 0) {
+            this.showError('No backgrounds generated yet. Please generate backgrounds first.');
             return;
         }
         
-        const sendBtn = document.getElementById('sendBackgroundBtn');
-        const originalText = sendBtn.innerHTML;
+        const selectedBackground = this.selectedBackgroundId || this.generatedBackgroundIds[0];
+        const backgroundCount = this.generatedBackgroundIds.length;
         
-        try {
-            // Update button state
-            sendBtn.disabled = true;
-            sendBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Uploading...';
-            
-            const response = await fetch('/api/upload-background-to-canva', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    background_file_path: this.generatedBackgroundPath,
-                    background_filename: this.generatedBackgroundFilename
-                })
-            });
-            
-            const result = await response.json();
-            
-            if (result.success) {
-                // Store the asset ID for future use
-                this.generatedBackgroundId = result.background_asset_id;
-                this.showSuccessMessage('🎨 Background uploaded to Canva successfully! It\'s now available in your Canva "Uploads" section.');
-            } else {
-                throw new Error(result.error || 'Failed to upload background to Canva');
-            }
-            
-        } catch (error) {
-            console.error('Error adding background to Canva:', error);
-            this.showError('Failed to add background to Canva: ' + error.message);
-        } finally {
-            // Reset button
-            sendBtn.disabled = false;
-            sendBtn.innerHTML = originalText;
-        }
+        this.showSuccessMessage(`🎨 ${backgroundCount} background${backgroundCount > 1 ? 's' : ''} already uploaded to Canva! Selected background ready for banner generation.`);
+        this.checkIfReadyForBannerGeneration();
     }
 
     showBackgroundPreview(backgroundUrl) {
@@ -2135,6 +2116,74 @@ class BannerMaker {
         const sendBackgroundBtn = document.getElementById('sendBackgroundBtn');
         if (sendBackgroundBtn) {
             sendBackgroundBtn.style.display = 'none';
+        }
+    }
+
+    showBackgroundPreviews(backgroundUrls, assetIds) {
+        const preview = document.getElementById('backgroundPreview');
+        const grid = document.getElementById('backgroundGrid');
+        
+        if (!preview || !grid) {
+            console.warn('backgroundPreview or backgroundGrid element not found');
+            return;
+        }
+        
+        // Clear existing previews
+        grid.innerHTML = '';
+        
+        // Add each background image to the grid
+        backgroundUrls.forEach((url, index) => {
+            const imageContainer = document.createElement('div');
+            imageContainer.className = 'relative cursor-pointer hover:opacity-80 transition-opacity';
+            
+            const img = document.createElement('img');
+            img.src = url;
+            img.className = 'w-full h-20 object-cover rounded-lg border-2 border-gray-300 hover:border-blue-500';
+            img.alt = `Generated background ${index + 1}`;
+            img.title = `Background ${index + 1} - Click to select`;
+            
+            // Add click handler for image selection
+            img.addEventListener('click', () => {
+                // Remove selection from other images
+                grid.querySelectorAll('img').forEach(i => {
+                    i.classList.remove('border-blue-500', 'border-4');
+                    i.classList.add('border-gray-300', 'border-2');
+                });
+                
+                // Add selection to clicked image
+                img.classList.remove('border-gray-300', 'border-2');
+                img.classList.add('border-blue-500', 'border-4');
+                
+                // Store selected background
+                this.selectedBackgroundIndex = index;
+                this.selectedBackgroundId = assetIds[index];
+            });
+            
+            // Add image number overlay
+            const numberOverlay = document.createElement('div');
+            numberOverlay.className = 'absolute top-1 left-1 bg-black bg-opacity-70 text-white text-xs px-1 py-0.5 rounded';
+            numberOverlay.textContent = index + 1;
+            
+            imageContainer.appendChild(img);
+            imageContainer.appendChild(numberOverlay);
+            grid.appendChild(imageContainer);
+        });
+        
+        // Show the preview section
+        preview.classList.remove('hidden');
+        
+        // Auto-select first image
+        if (backgroundUrls.length > 0) {
+            const firstImg = grid.querySelector('img');
+            if (firstImg) {
+                firstImg.click();
+            }
+        }
+        
+        // Show the send background button
+        const sendBackgroundBtn = document.getElementById('sendBackgroundBtn');
+        if (sendBackgroundBtn) {
+            sendBackgroundBtn.style.display = 'block';
         }
     }
 
@@ -2193,50 +2242,22 @@ class BannerMaker {
             let prompt = '';
             
             if (selectedCopy && selectedCopy.background_prompt && selectedCopy.background_prompt.trim()) {
-                // Use existing background prompt but enhance it with copy information
-                const basePrompt = selectedCopy.background_prompt.trim();
-                const copyText = selectedCopy?.text || '';
-                const copyType = selectedCopy?.type || 'professional';
-                const tone = selectedCopy?.tone || 'professional';
-                
-                // Extract headline (first line) 
-                const lines = copyText.split('\n').filter(line => line.trim());
-                const headline = lines[0] || '';
-                
-                prompt = `${basePrompt}
-
-このコピーに合うように調整：
-- メインメッセージ: "${headline}"
-- コピータイプ: ${copyType}
-- このマーケティングメッセージの感情的アピールと${tone}な雰囲気をサポートする視覚的スタイルで作成してください`;
+                // Use the original background prompt without modifications
+                prompt = selectedCopy.background_prompt.trim();
+                console.log('✅ Using original background prompt without copy context:', prompt);
             } else {
-                // Create comprehensive prompt based on copy details
-                const copyType = selectedCopy?.type || 'professional';
-                const copyText = selectedCopy?.text || '';
-                const tone = selectedCopy?.tone || 'professional';
-                
-                // Extract headline (first line) and supporting text
-                const lines = copyText.split('\n').filter(line => line.trim());
-                const headline = lines[0] || '';
-                const supportingText = lines.slice(1).join(' ').substring(0, 80);
-                
-                prompt = `${copyType}なマーケティング背景を作成してください。
-
-マーケティングコピー情報:
-- メインメッセージ: "${headline}"
-- サポートテキスト: "${supportingText}${supportingText ? '...' : ''}"
-- コピータイプ: ${copyType}
+                // Use a generic professional background prompt
+                prompt = `プロフェッショナルなマーケティング背景を作成してください。
 
 視覚的要件:
-- ${tone}で${copyType}な雰囲気を表現
-- テキストオーバーレイの読みやすさを最適化
-- メッセージの感情的アピールをサポートするビジュアルスタイル
 - 抽象的パターン、テクスチャ、幾何学的形状
-- テキストと競合しない洗練された配色
+- テキストオーバーレイの読みやすさを最優先
+- 洗練された配色でテキストと競合しない
 - プロフェッショナルなマーケティング素材の美観
-- 文字、ロゴ、特定のブランド要素は含めない`;
+- 文字、ロゴ、特定のブランド要素は含めない
+- クリーンでモダンなデザイン`;
                 
-                console.log('✅ Using generated comprehensive prompt:', prompt);
+                console.log('✅ Using generic professional background prompt:', prompt);
             }
             
             promptText.value = prompt;
@@ -2287,6 +2308,11 @@ class BannerMaker {
                 </span>
             `;
             statusDisplay.className = 'w-full px-4 py-3 border border-green-300 rounded-lg bg-green-50';
+        }
+        
+        // Show background prompt from first copy variant if available
+        if (this.copyVariants && this.copyVariants.length > 0) {
+            this.showBackgroundPrompt(this.copyVariants[0]);
         }
     }
 

@@ -1,14 +1,18 @@
 import os
 from typing import List, Dict
-import openai
+from google import genai
+from google.genai import types
 import asyncio
 
 
-def setup_openai_client() -> openai.OpenAI:
+def setup_gemini_client() -> genai.Client:
     """
-    Initialize OpenAI client for copy generation
+    Initialize Gemini client for copy generation
     """
-    return openai.OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
+    api_key = os.getenv('GOOGLE_API_KEY')
+    if not api_key:
+        raise ValueError("GOOGLE_API_KEY environment variable not set")
+    return genai.Client(api_key=api_key)
 
 
 def generate_copy_and_visual_prompts(
@@ -22,7 +26,7 @@ def generate_copy_and_visual_prompts(
     Variants: benefit, urgency, promo, neutral, playful
     """
     try:
-        client = setup_openai_client()
+        client = setup_gemini_client()
         
         # Prepare context for copy generation
         context = f"""
@@ -118,24 +122,21 @@ PLAYFUL:
 COPY: [playful copy here]
 BACKGROUND: 文字・ロゴ・テキストを一切含まない抽象的なマーケティングバナー背景を作成：[この特定のフレンドリーなコピーに合う温かく親しみやすい雰囲気を詳しく描写、親しみやすいビジュアルスタイル、純粋に抽象的な要素のみ]"""
         
-        # Single LLM call instead of loop
-        models_to_try = ["gpt-4.1-mini", "gpt-4.1", "gpt-4.1-nano", "gpt-4o-mini"]
-        
-        response = None
-        for model in models_to_try:
-            try:
-                response = client.chat.completions.create(
-                    model=model,
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt}
-                    ],
+        # Use Gemini API for content generation
+        try:
+            response = client.models.generate_content(
+                model="gemini-2.5-flash-lite",
+                contents=user_prompt,
+                config=types.GenerateContentConfig(
+                    system_instruction=system_prompt,
+                    temperature=0.7,
+                    max_output_tokens=2000
                 )
-                print(f"Copy generation successful with model: {model}")
-                break
-            except Exception as model_error:
-                print(f"Model {model} failed: {model_error}")
-                continue
+            )
+            print(f"Copy generation successful with model: gemini-2.5-flash-lite")
+        except Exception as model_error:
+            print(f"Gemini API failed: {model_error}")
+            response = None
         
         results = []
         
@@ -144,7 +145,7 @@ BACKGROUND: 文字・ロゴ・テキストを一切含まない抽象的なマ�
             return generate_fallback_copy_with_prompts(text_content, title)
         
         # Parse the single response containing all 5 variants
-        response_text = response.choices[0].message.content.strip()
+        response_text = response.text.strip()
         
         # Parse all variants from single response
         for variant in copy_variants:
