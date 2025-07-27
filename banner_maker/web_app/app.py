@@ -789,7 +789,7 @@ def check_cache_status(url):
 
 @app.route('/api/copy-variants', methods=['POST'])
 def get_copy_variants():
-    """Generate copy variants for manual selection"""
+    """Generate copy variants for manual selection (Legacy endpoint - redirects to new workflow)"""
     try:
         data = request.get_json()
         url = data.get('url')
@@ -797,7 +797,7 @@ def get_copy_variants():
         if not url:
             return jsonify({'error': 'URL is required'}), 400
         
-        # Check cache first
+        # Check cache first for existing copy variants
         cached_copy_data = get_cached_copy_data(url)
         if cached_copy_data:
             return jsonify({
@@ -805,48 +805,18 @@ def get_copy_variants():
                 'cached': True
             })
         
-        # Get page data - scrape if not available or if cache is incomplete
+        # Redirect to new workflow: require intelligent scraping first
         cached_page_data = get_cached_scraping_data(url)
-        
-        # Check if cache is incomplete or missing critical data
         if not cached_page_data or 'lp_data' not in cached_page_data or 'page_meta' not in cached_page_data:
-            if cached_page_data:
-                print(f"🔄 CACHE INCOMPLETE for copy variants {url}: Re-scraping to ensure data integrity.")
-                logger.warning("Incomplete cache found for copy variants. Re-scraping to ensure data integrity.")
-            else:
-                print(f"🔄 NO CACHE FOUND for copy variants {url}: Performing fresh scraping.")
-                logger.info("No cached data found for copy variants. Performing fresh scraping.")
-            
-            # Auto-scrape the page
-            try:
-                print(f"📡 Starting fresh scrape for copy variants: {url}")
-                import asyncio
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                
-                lp_data = loop.run_until_complete(scrape_landing_page(url))
-                page_meta = loop.run_until_complete(get_page_title_and_description(url))
-                
-                # Ensure we have the scraping results before proceeding
-                if not lp_data or not page_meta:
-                    raise Exception("Failed to scrape page data")
-                
-                # Cache the scraping results completely
-                cache_scraping_data(url, lp_data, page_meta)
-                print(f"✅ FRESH SCRAPE COMPLETED for copy variants {url}: Data cached successfully")
-                logger.info(f"Successfully scraped and cached data for copy variants: {url}")
-                
-                loop.close()
-                
-            except Exception as scrape_error:
-                print(f"❌ COPY VARIANTS SCRAPE FAILED for {url}: {scrape_error}")
-                logger.error(f"Web scraping failed for copy variants: {scrape_error}")
-                return jsonify({'error': f'Failed to scrape page for copy variants: {str(scrape_error)}'}), 500
-        else:
-            print(f"✅ USING CACHED DATA for copy variants {url}: Complete data found")
-            lp_data = cached_page_data['lp_data']
-            page_meta = cached_page_data['page_meta']
-            logger.info(f"Using cached data for copy variants: {url}")
+            return jsonify({
+                'error': 'Please use "Intelligent Scraping" first, then "Generate Copy".',
+                'require_scraping': True
+            }), 400
+        
+        # Use cached data from intelligent scraping
+        lp_data = cached_page_data['lp_data']
+        page_meta = cached_page_data['page_meta']
+        logger.info(f"Using cached data for copy variants: {url}")
         
         # Generate copy variants
         copy_variants = generate_copy_and_visual_prompts(
@@ -861,7 +831,8 @@ def get_copy_variants():
         
         return jsonify({
             'variants': copy_variants,
-            'cached': False
+            'cached': False,
+            'source': 'intelligent_scraping'
         })
         
     except Exception as e:
@@ -870,7 +841,7 @@ def get_copy_variants():
 
 @app.route('/api/generate-copy', methods=['POST'])
 def generate_copy_variants():
-    """Generate 5 editable copy variants"""
+    """Generate 5 editable copy variants using saved scraping results"""
     try:
         data = request.get_json()
         url = data.get('url')
@@ -878,76 +849,27 @@ def generate_copy_variants():
         if not url:
             return jsonify({'error': 'URL is required'}), 400
         
-        # Initialize variables
-        lp_data = None
-        page_meta = None
-        
-        # Get page data - scrape if not available or if cache is incomplete
+        # Get saved scraping data from the intelligent scraping step
         cached_page_data = get_cached_scraping_data(url)
         
-        # Check if cache is incomplete or missing critical data
         if not cached_page_data or 'lp_data' not in cached_page_data or 'page_meta' not in cached_page_data:
-            if cached_page_data:
-                print(f"🔄 CACHE INCOMPLETE for {url}: Re-scraping to ensure data integrity.")
-                logger.warning("Incomplete cache found. Re-scraping to ensure data integrity.")
-            else:
-                print(f"🔄 NO CACHE FOUND for {url}: Performing fresh scraping.")
-                logger.info("No cached data found. Performing fresh scraping.")
-            
-            # Try to auto-scrape the page
-            try:
-                print(f"📡 Starting fresh scrape for: {url}")
-                import asyncio
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                
-                lp_data = loop.run_until_complete(scrape_landing_page(url))
-                page_meta = loop.run_until_complete(get_page_title_and_description(url))
-                
-                # Ensure we have the scraping results before proceeding
-                if not lp_data or not page_meta:
-                    raise Exception("Failed to scrape page data")
-                
-                # Cache the scraping results completely
-                cache_scraping_data(url, lp_data, page_meta)
-                print(f"✅ FRESH SCRAPE COMPLETED for {url}: Data cached successfully")
-                logger.info(f"Successfully scraped and cached data for URL: {url}")
-                
-                loop.close()
-                
-            except Exception as scrape_error:
-                print(f"❌ SCRAPE FAILED for {url}: {scrape_error}")
-                logger.error(f"Web scraping failed: {scrape_error}")
-                # Fallback to mock copy generation
-                try:
-                    from src.mock_copy_gen import generate_mock_copy_variants
-                    copy_variants = generate_mock_copy_variants(url)
-                    
-                    return jsonify({
-                        'success': True,
-                        'variants': copy_variants,
-                        'message': 'Generated copy from URL analysis (web scraping unavailable)',
-                        'source': 'mock'
-                    })
-                    
-                except Exception as mock_error:
-                    logger.error(f"Mock copy generation also failed: {mock_error}")
-                    return jsonify({'error': f'Copy generation failed: web scraping error - {str(scrape_error)}'}), 500
-        else:
-            print(f"✅ USING CACHED DATA for {url}: Complete data found")
-            lp_data = cached_page_data['lp_data']
-            page_meta = cached_page_data['page_meta']
-            logger.info(f"Using cached data for URL: {url}")
+            return jsonify({
+                'error': 'No scraping data found. Please run "Intelligent Scraping" first.',
+                'require_scraping': True
+            }), 400
         
-        # Verify that we have the required data
-        if not lp_data or not page_meta:
-            return jsonify({'error': 'Failed to retrieve page data'}), 500
+        lp_data = cached_page_data['lp_data']
+        page_meta = cached_page_data['page_meta']
+        llm_extracted_data = cached_page_data.get('llm_extracted_data', {})
         
-        # Generate 5 copy variants from scraped data
+        logger.info(f"Generating copy variants using cached data for {url}")
+        
+        # Generate 5 copy variants from scraped data using rich LLM extracted information
         copy_variants = generate_copy_and_visual_prompts(
             text_content=lp_data.get('text_content', ''),
             title=page_meta.get('title', ''),
-            description=page_meta.get('description', '')
+            description=page_meta.get('description', ''),
+            llm_extracted_data=llm_extracted_data
         )
         
         # Don't cache automatically - let user select first
@@ -955,7 +877,8 @@ def generate_copy_variants():
             'success': True,
             'variants': copy_variants,
             'page_title': page_meta['title'],
-            'page_description': page_meta['description']
+            'page_description': page_meta['description'],
+            'source': 'intelligent_scraping'
         })
         
     except Exception as e:
@@ -1063,7 +986,7 @@ def generate_background():
 
 @app.route('/api/generate-explanation', methods=['POST'])
 def generate_explanation():
-    """Generate creative explanation and insights"""
+    """Generate creative explanation and insights using saved scraping results"""
     try:
         data = request.get_json()
         url = data.get('url')
@@ -1071,55 +994,28 @@ def generate_explanation():
         if not url:
             return jsonify({'error': 'URL is required'}), 400
         
-        # Get page data - scrape if not available or if cache is incomplete
+        # Get saved scraping data from the intelligent scraping step
         cached_page_data = get_cached_scraping_data(url)
         
-        # Check if cache is incomplete or missing critical data
         if not cached_page_data or 'lp_data' not in cached_page_data or 'page_meta' not in cached_page_data:
-            if cached_page_data:
-                print(f"🔄 CACHE INCOMPLETE for explanation {url}: Re-scraping to ensure data integrity.")
-                logger.warning("Incomplete cache found for explanation. Re-scraping to ensure data integrity.")
-            else:
-                print(f"🔄 NO CACHE FOUND for explanation {url}: Performing fresh scraping.")
-                logger.info("No cached data found for explanation. Performing fresh scraping.")
-            
-            # Auto-scrape the page
-            try:
-                print(f"📡 Starting fresh scrape for explanation: {url}")
-                import asyncio
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                
-                lp_data = loop.run_until_complete(scrape_landing_page(url))
-                page_meta = loop.run_until_complete(get_page_title_and_description(url))
-                
-                # Ensure we have the scraping results before proceeding
-                if not lp_data or not page_meta:
-                    raise Exception("Failed to scrape page data")
-                
-                # Cache the scraping results completely
-                cache_scraping_data(url, lp_data, page_meta)
-                print(f"✅ FRESH SCRAPE COMPLETED for explanation {url}: Data cached successfully")
-                logger.info(f"Successfully scraped and cached data for explanation: {url}")
-                
-                loop.close()
-                
-            except Exception as scrape_error:
-                print(f"❌ EXPLANATION SCRAPE FAILED for {url}: {scrape_error}")
-                logger.error(f"Web scraping failed for explanation: {scrape_error}")
-                return jsonify({'error': f'Failed to scrape page for explanation: {str(scrape_error)}'}), 500
-        else:
-            print(f"✅ USING CACHED DATA for explanation {url}: Complete data found")
-            lp_data = cached_page_data['lp_data']
-            page_meta = cached_page_data['page_meta']
-            logger.info(f"Using cached data for explanation: {url}")
+            return jsonify({
+                'error': 'No scraping data found. Please run "Intelligent Scraping" first.',
+                'require_scraping': True
+            }), 400
+        
+        lp_data = cached_page_data['lp_data']
+        page_meta = cached_page_data['page_meta']
+        llm_extracted_data = cached_page_data.get('llm_extracted_data', {})
+        
+        logger.info(f"Generating explanation using cached data for {url}")
         
         # Generate creative explanation using the enhanced scraping data
         explanation = generate_creative_explanation(
             text_content=lp_data['text_content'],
             title=page_meta['title'],
             description=page_meta['description'],
-            url=url
+            url=url,
+            llm_extracted_data=llm_extracted_data
         )
         
         # Cache the explanation
@@ -1135,7 +1031,8 @@ def generate_explanation():
             'success': True,
             'explanation': explanation,
             'page_title': page_meta['title'],
-            'page_description': page_meta['description']
+            'page_description': page_meta['description'],
+            'source': 'intelligent_scraping'
         })
         
     except Exception as e:
@@ -1532,9 +1429,133 @@ def add_background_to_design():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/intelligent-scraping', methods=['POST'])
+def intelligent_scraping():
+    """Unified intelligent scraping endpoint using the new LLM scraper system"""
+    try:
+        data = request.get_json()
+        url = data.get('url')
+        
+        if not url:
+            return jsonify({'error': 'URL is required'}), 400
+        
+        # Check cache first
+        cached_data = get_cached_scraping_data(url)
+        if cached_data:
+            logger.info(f"Returning cached intelligent scraping data for {url}")
+            return jsonify({
+                'success': True,
+                'cached': True,
+                'url': url,
+                'extraction_method': cached_data.get('extraction_method', 'cached'),
+                'confidence': cached_data.get('confidence', 1.0),
+                'timestamp': cached_data.get('timestamp'),
+                'llm_extracted_data': cached_data.get('llm_extracted_data', {}),
+                'preprocessed_data_file': cached_data.get('preprocessed_data_file'),
+                'page_title': cached_data.get('page_meta', {}).get('title', ''),
+                'page_description': cached_data.get('page_meta', {}).get('description', '')
+            })
+        
+        # Use the new LLM scraper
+        import asyncio
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        try:
+            logger.info(f"Starting intelligent scraping for {url}")
+            
+            # Import and use the new scraper
+            from src.llm_scraper import scrape_page_with_llm
+            
+            if not GOOGLE_API_KEY:
+                return jsonify({'error': 'Google API key not configured'}), 500
+            
+            # Use the new LLM scraper
+            result = loop.run_until_complete(
+                scrape_page_with_llm(url, GOOGLE_API_KEY, save_preprocessed=True)
+            )
+            
+            # Extract the clean results from the new format
+            llm_extracted_data = result.get('llm_extracted_data', {})
+            extraction_method = result.get('extraction_method', 'unknown')
+            confidence = result.get('confidence', 0.0)
+            preprocessed_data_file = result.get('preprocessed_data_file')
+            
+            # Create compatible format for existing system
+            # Use LLM extracted data to create page_meta
+            page_meta = {
+                'title': llm_extracted_data.get('product_name', 'Page Title'),
+                'description': llm_extracted_data.get('product_description', '')
+            }
+            
+            # Create enhanced text content from LLM data for backward compatibility
+            enhanced_content_parts = []
+            if llm_extracted_data.get('product_name'):
+                enhanced_content_parts.append(f"Product: {llm_extracted_data['product_name']}")
+            if llm_extracted_data.get('product_description'):
+                enhanced_content_parts.append(f"Description: {llm_extracted_data['product_description']}")
+            if llm_extracted_data.get('key_features'):
+                if isinstance(llm_extracted_data['key_features'], list):
+                    enhanced_content_parts.append(f"Features: {', '.join(llm_extracted_data['key_features'])}")
+                else:
+                    enhanced_content_parts.append(f"Features: {llm_extracted_data['key_features']}")
+            if llm_extracted_data.get('unique_selling_points'):
+                enhanced_content_parts.append(f"Benefits: {llm_extracted_data['unique_selling_points']}")
+            
+            enhanced_text_content = " | ".join(enhanced_content_parts)
+            
+            # Create lp_data in compatible format
+            lp_data = {
+                'text_content': enhanced_text_content,
+                'images': [],  # Not using images from LLM scraper for now
+                'has_viable_image': False,
+                'hero_image_data': None,
+                'extraction_method': extraction_method,
+                'llm_extracted_data': llm_extracted_data,
+                'confidence': confidence
+            }
+            
+            # Store all results in cache for later use
+            cache_data = {
+                'lp_data': lp_data,
+                'page_meta': page_meta,
+                'timestamp': result.get('timestamp', time.time()),
+                'extraction_method': extraction_method,
+                'confidence': confidence,
+                'llm_extracted_data': llm_extracted_data,
+                'preprocessed_data_file': preprocessed_data_file
+            }
+            
+            # Cache using URL as key
+            scraping_cache[url] = cache_data
+            
+            logger.info(f"Intelligent scraping completed for {url} with method: {extraction_method}, confidence: {confidence}")
+            
+            return jsonify({
+                'success': True,
+                'cached': False,
+                'url': url,
+                'extraction_method': extraction_method,
+                'confidence': confidence,
+                'timestamp': result.get('timestamp'),
+                'llm_extracted_data': llm_extracted_data,
+                'preprocessed_data_file': preprocessed_data_file,
+                'page_title': page_meta['title'],
+                'page_description': page_meta['description'],
+                'model_used': result.get('model_used', 'gemini-2.5-flash-lite')
+            })
+            
+        finally:
+            loop.close()
+            
+    except Exception as e:
+        logger.error(f"Intelligent scraping error for {url}: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/scrape-llm', methods=['POST'])
 def scrape_with_llm_endpoint():
-    """API endpoint for LLM-enhanced web scraping"""
+    """Legacy API endpoint for LLM-enhanced web scraping (deprecated)"""
     try:
         data = request.get_json()
         url = data.get('url')

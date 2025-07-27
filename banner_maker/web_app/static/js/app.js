@@ -15,6 +15,12 @@ class BannerMaker {
         this.extractedImagePaths = []; // Track extracted images for cleanup after Canva upload
         
         this.initializeEventListeners();
+        
+        // Ensure buttons start disabled until intelligent scraping is completed
+        this.disableCopyAndExplanationButtons();
+        
+        // Ensure URL-dependent buttons start disabled
+        this.updateUrlDependentButtons('');
     }
 
     // Helper function to safely manipulate element classes
@@ -28,6 +34,46 @@ class BannerMaker {
             }
         } else {
             console.warn(`Element with id '${elementId}' not found`);
+        }
+    }
+
+    // Helper function to disable copy and explanation buttons
+    disableCopyAndExplanationButtons() {
+        const generateCopyBtn = document.getElementById('generateCopyBtn');
+        const generateExplanationBtn = document.getElementById('generateExplanationBtn');
+        
+        if (generateCopyBtn) {
+            generateCopyBtn.disabled = true;
+            generateCopyBtn.classList.remove('bg-purple-500', 'hover:bg-purple-600');
+            generateCopyBtn.classList.add('bg-gray-500');
+        }
+        
+        if (generateExplanationBtn) {
+            generateExplanationBtn.disabled = true;
+            generateExplanationBtn.classList.remove('bg-blue-500', 'hover:bg-blue-600');
+            generateExplanationBtn.classList.add('bg-gray-500');
+        }
+        
+        // Hide any previous results
+        this.safeToggleClass('generatedCopySection', 'hidden', true);
+        this.safeToggleClass('explanationSection', 'hidden', true);
+        this.safeToggleClass('scrapingStatusSection', 'hidden', true);
+    }
+
+    // Helper function to manage URL-dependent buttons
+    updateUrlDependentButtons(url) {
+        const extractImagesBtn = document.getElementById('extractImagesBtn');
+        const isValidUrl = url && url.startsWith('http');
+        
+        if (extractImagesBtn) {
+            extractImagesBtn.disabled = !isValidUrl;
+            if (isValidUrl) {
+                extractImagesBtn.classList.remove('bg-gray-500');
+                extractImagesBtn.classList.add('bg-green-500', 'hover:bg-green-600');
+            } else {
+                extractImagesBtn.classList.remove('bg-green-500', 'hover:bg-green-600');
+                extractImagesBtn.classList.add('bg-gray-500');
+            }
         }
     }
 
@@ -87,8 +133,17 @@ class BannerMaker {
         if (urlInput) {
             urlInput.addEventListener('input', (e) => {
                 clearTimeout(urlCheckTimeout);
+                const url = e.target.value.trim();
+                
+                // When URL changes, disable buttons and hide previous results
+                // This ensures user must run intelligent scraping again for new URL
+                this.disableCopyAndExplanationButtons();
+                
+                // Update URL-dependent buttons (like Extract Images)
+                this.updateUrlDependentButtons(url);
+                
                 urlCheckTimeout = setTimeout(() => {
-                    this.checkUrlCacheStatus(e.target.value.trim());
+                    this.checkUrlCacheStatus(url);
                 }, 1000); // Check after 1 second of no typing
             });
         }
@@ -106,6 +161,14 @@ class BannerMaker {
                 } else {
                     this.resetGenerateButton();
                 }
+            });
+        }
+
+        // Intelligent scraping button
+        const intelligentScrapeBtn = document.getElementById('intelligentScrapeBtn');
+        if (intelligentScrapeBtn) {
+            intelligentScrapeBtn.addEventListener('click', () => {
+                this.intelligentScraping();
             });
         }
 
@@ -987,6 +1050,12 @@ class BannerMaker {
         // Reset session and URL
         this.currentSessionId = null;
         this.currentUrl = null;
+        
+        // Disable copy and explanation buttons
+        this.disableCopyAndExplanationButtons();
+        
+        // Disable URL-dependent buttons
+        this.updateUrlDependentButtons('');
         
         // Scroll to top
         window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -1934,6 +2003,224 @@ class BannerMaker {
         }, 4000);
     }
 
+    async intelligentScraping() {
+        console.log('intelligentScraping method called');
+        const url = document.getElementById('url').value.trim();
+        const scrapeBtn = document.getElementById('intelligentScrapeBtn');
+        const generateCopyBtn = document.getElementById('generateCopyBtn');
+        const generateExplanationBtn = document.getElementById('generateExplanationBtn');
+        
+        if (!url) {
+            this.showError('Please enter a URL first');
+            return;
+        }
+
+        // Store URL for later use
+        this.currentUrl = url;
+
+        try {
+            // Update button state
+            if (scrapeBtn) {
+                scrapeBtn.disabled = true;
+                scrapeBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Analyzing...';
+            }
+
+            console.log('Starting intelligent scraping for:', url);
+
+            const response = await fetch('/api/intelligent-scraping', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ url })
+            });
+
+            const result = await response.json();
+
+            if (!response.ok) {
+                throw new Error(result.error || 'Intelligent scraping failed');
+            }
+
+            if (result.success) {
+                // Show scraping results
+                this.displayScrapingResults(result);
+                
+                // Enable copy and explanation buttons
+                if (generateCopyBtn) {
+                    generateCopyBtn.disabled = false;
+                    generateCopyBtn.classList.remove('bg-gray-500', 'from-gray-400', 'to-gray-500');
+                    generateCopyBtn.classList.add('bg-purple-500', 'hover:bg-purple-600');
+                }
+                
+                if (generateExplanationBtn) {
+                    generateExplanationBtn.disabled = false;
+                    generateExplanationBtn.classList.remove('bg-gray-500');
+                    generateExplanationBtn.classList.add('bg-blue-500', 'hover:bg-blue-600');
+                }
+
+                this.showSuccessMessage(`🧠 Intelligent scraping completed using ${result.extraction_method} method!`);
+            } else {
+                throw new Error(result.error || 'Intelligent scraping failed');
+            }
+
+        } catch (error) {
+            console.error('Intelligent scraping error:', error);
+            this.showError(`Intelligent scraping failed: ${error.message}`);
+        } finally {
+            // Reset button state
+            if (scrapeBtn) {
+                scrapeBtn.disabled = false;
+                scrapeBtn.innerHTML = '<i class="fas fa-brain mr-2"></i>Intelligent Scraping';
+            }
+        }
+    }
+
+    displayScrapingResults(result) {
+        const scrapingSection = document.getElementById('scrapingStatusSection');
+        const scrapingContent = document.getElementById('scrapingStatusContent');
+        
+        if (!scrapingSection || !scrapingContent) return;
+
+        // Show the section
+        scrapingSection.classList.remove('hidden');
+
+        // Build the status display with enhanced information
+        const confidence = result.confidence || 0;
+        const extractionMethod = result.extraction_method || 'unknown';
+        const pageTitle = result.page_title || 'N/A';
+        const modelUsed = result.model_used || 'gemini-2.5-flash-lite';
+        const extractedData = result.llm_extracted_data || {};
+        
+        // Create a comprehensive display of all possible extracted data fields
+        const getExtractedDataDisplay = () => {
+            // Define the field mapping with icons and descriptions
+            const fieldMappings = {
+                'product_name': { icon: 'fas fa-tag', label: 'Product Name', color: 'blue' },
+                'product_description': { icon: 'fas fa-file-alt', label: 'Description', color: 'green' },
+                'key_features': { icon: 'fas fa-star', label: 'Key Features', color: 'yellow' },
+                'price_info': { icon: 'fas fa-dollar-sign', label: 'Price Information', color: 'green' },
+                'brand_name': { icon: 'fas fa-building', label: 'Brand Name', color: 'purple' },
+                'category': { icon: 'fas fa-layer-group', label: 'Category', color: 'indigo' },
+                'target_audience': { icon: 'fas fa-users', label: 'Target Audience', color: 'pink' },
+                'unique_selling_points': { icon: 'fas fa-gem', label: 'Unique Selling Points', color: 'orange' },
+                'call_to_action': { icon: 'fas fa-hand-pointer', label: 'Call to Action', color: 'red' },
+                'availability': { icon: 'fas fa-box', label: 'Availability', color: 'teal' },
+                'specifications': { icon: 'fas fa-cogs', label: 'Specifications', color: 'gray' },
+                'reviews_sentiment': { icon: 'fas fa-comments', label: 'Reviews Sentiment', color: 'blue' }
+            };
+            
+            const dataEntries = Object.entries(extractedData).filter(([, value]) => {
+                return value && value.toString().trim() !== '';
+            });
+            
+            if (dataEntries.length === 0) {
+                return '<div class="text-sm text-gray-500 italic">No specific data extracted</div>';
+            }
+            
+            return dataEntries.map(([key, value]) => {
+                const mapping = fieldMappings[key] || { icon: 'fas fa-info-circle', label: key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()), color: 'gray' };
+                
+                let displayValue;
+                if (Array.isArray(value)) {
+                    displayValue = value.join(', ');
+                } else if (typeof value === 'object') {
+                    // Handle specifications object
+                    displayValue = Object.entries(value).map(([k, v]) => `${k}: ${v}`).join(', ');
+                } else {
+                    displayValue = value.toString();
+                }
+                
+                const truncatedValue = displayValue.length > 200 ? displayValue.substring(0, 200) + '...' : displayValue;
+                
+                return `
+                    <div class="bg-white border border-${mapping.color}-200 rounded-lg p-3 hover:shadow-sm transition-shadow">
+                        <div class="flex items-center mb-2">
+                            <i class="${mapping.icon} text-${mapping.color}-500 mr-2"></i>
+                            <span class="text-sm font-medium text-gray-700">${mapping.label}</span>
+                        </div>
+                        <div class="text-sm text-gray-800 leading-relaxed">${truncatedValue}</div>
+                    </div>
+                `;
+            }).join('');
+        };
+
+        const statusHtml = `
+            <div class="flex items-center justify-between mb-4">
+                <div class="flex items-center">
+                    <i class="fas fa-check-circle text-green-500 mr-2"></i>
+                    <span class="font-medium text-gray-800">Intelligent Scraping Completed</span>
+                </div>
+                <div class="text-sm text-gray-500">
+                    ${result.cached ? '🔄 Cached' : '✨ Fresh'} • ${new Date().toLocaleTimeString()}
+                </div>
+            </div>
+            
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
+                <div class="bg-gradient-to-r from-blue-50 to-indigo-50 p-3 rounded-lg border border-blue-200">
+                    <div class="text-sm font-medium text-gray-600 mb-1">
+                        <i class="fas fa-cogs mr-1"></i>Extraction Method
+                    </div>
+                    <div class="text-sm text-gray-800 font-medium">
+                        <i class="fas fa-${extractionMethod === 'playwright' ? 'robot text-purple-500' : 'globe text-blue-500'} mr-1"></i>
+                        ${extractionMethod === 'playwright' ? 'Playwright (Browser)' : 'Advanced Requests'}
+                    </div>
+                </div>
+                
+                <div class="bg-gradient-to-r from-green-50 to-emerald-50 p-3 rounded-lg border border-green-200">
+                    <div class="text-sm font-medium text-gray-600 mb-1">
+                        <i class="fas fa-bullseye mr-1"></i>Confidence Score
+                    </div>
+                    <div class="text-sm text-gray-800 font-medium">
+                        <span class="inline-flex items-center">
+                            <span class="w-2 h-2 rounded-full mr-2 ${confidence >= 0.8 ? 'bg-green-500' : confidence >= 0.6 ? 'bg-yellow-500' : 'bg-red-500'}"></span>
+                            ${(confidence * 100).toFixed(1)}%
+                        </span>
+                    </div>
+                </div>
+                
+                <div class="bg-gradient-to-r from-purple-50 to-pink-50 p-3 rounded-lg border border-purple-200">
+                    <div class="text-sm font-medium text-gray-600 mb-1">
+                        <i class="fas fa-file-alt mr-1"></i>Page Title
+                    </div>
+                    <div class="text-sm text-gray-800 font-medium truncate" title="${pageTitle}">
+                        ${pageTitle}
+                    </div>
+                </div>
+                
+                <div class="bg-gradient-to-r from-orange-50 to-red-50 p-3 rounded-lg border border-orange-200">
+                    <div class="text-sm font-medium text-gray-600 mb-1">
+                        <i class="fas fa-brain mr-1"></i>AI Model Used
+                    </div>
+                    <div class="text-sm text-gray-800 font-medium">
+                        ${modelUsed}
+                    </div>
+                </div>
+            </div>
+            
+            <div class="bg-gray-50 p-4 rounded-lg border">
+                <div class="flex items-center mb-3">
+                    <i class="fas fa-database text-indigo-500 mr-2"></i>
+                    <span class="text-sm font-medium text-gray-700">Extracted Information</span>
+                    <span class="ml-2 text-xs bg-indigo-100 text-indigo-600 px-2 py-1 rounded-full">
+                        ${Object.entries(extractedData).filter(([, value]) => value && value.toString().trim() !== '').length} fields found
+                    </span>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-64 overflow-y-auto">
+                    ${getExtractedDataDisplay()}
+                </div>
+            </div>
+            
+            <div class="mt-4 pt-3 border-t text-center">
+                <p class="text-sm text-gray-600">
+                    <i class="fas fa-arrow-right text-green-500 mr-1"></i>
+                    You can now generate copy and explanation using this scraped data
+                </p>
+            </div>
+        `;
+
+        scrapingContent.innerHTML = statusHtml;
+    }
+
     async generateCopy() {
         console.log('generateCopy method called');
         const url = document.getElementById('url').value.trim();
@@ -1985,12 +2272,23 @@ class BannerMaker {
                 
                 this.showSuccessMessage(`Generated ${result.variants.length} copy variants`);
             } else {
-                throw new Error(result.error || 'Failed to generate copy');
+                // Check if the error indicates scraping is required
+                if (result.require_scraping) {
+                    throw new Error('require_scraping: Please run Intelligent Scraping first');
+                } else {
+                    throw new Error(result.error || 'Failed to generate copy');
+                }
             }
 
         } catch (error) {
             console.error('Error generating copy:', error);
-            this.showError('Failed to generate copy: ' + error.message);
+            
+            // Check if error response indicates scraping is required
+            if (error.message && error.message.includes('require_scraping')) {
+                this.showError('Please run "Intelligent Scraping" first before generating copy.');
+            } else {
+                this.showError('Failed to generate copy: ' + error.message);
+            }
         } finally {
             // Reset button states
             generateBtn.disabled = false;
@@ -2476,12 +2774,23 @@ class BannerMaker {
                 this.showSuccessMessage('✨ Creative explanation generated successfully!');
                 console.log('Explanation generated:', result.explanation);
             } else {
-                throw new Error(result.error || 'Failed to generate explanation');
+                // Check if the error indicates scraping is required
+                if (result.require_scraping) {
+                    throw new Error('require_scraping: Please run Intelligent Scraping first');
+                } else {
+                    throw new Error(result.error || 'Failed to generate explanation');
+                }
             }
             
         } catch (error) {
             console.error('Error generating explanation:', error);
-            this.showError('Failed to generate explanation: ' + error.message);
+            
+            // Check if error response indicates scraping is required
+            if (error.message && error.message.includes('require_scraping')) {
+                this.showError('Please run "Intelligent Scraping" first before generating explanation.');
+            } else {
+                this.showError('Failed to generate explanation: ' + error.message);
+            }
         } finally {
             // Reset button states
             generateBtn.disabled = false;

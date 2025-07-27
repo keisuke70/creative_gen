@@ -233,20 +233,41 @@
                             <input type="url" id="url" name="url" required 
                                    class="flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                                    placeholder="https://example.com/your-landing-page">
-                            <button type="button" id="extractImagesBtn" 
-                                    class="px-4 py-3 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                            <button type="button" id="intelligentScrapeBtn" 
+                                    class="px-4 py-3 bg-gradient-to-r from-indigo-500 to-purple-600 text-white rounded-lg hover:from-indigo-600 hover:to-purple-700 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed font-medium">
+                                <i class="fas fa-brain mr-2"></i>Intelligent Scraping
+                            </button>
+                        </div>
+                        <div class="flex gap-2 mt-2">
+                            <button type="button" id="extractImagesBtn" disabled
+                                    class="px-4 py-3 bg-gray-500 text-white rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
                                 <i class="fas fa-images mr-2"></i>Extract Images
                             </button>
-                            <button type="button" id="generateCopyBtn" 
+                            <button type="button" id="generateCopyBtn" disabled
                                     class="px-4 py-3 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
                                 <i class="fas fa-pen-fancy mr-2"></i>Generate Copy
                             </button>
-                            <button type="button" id="generateExplanationBtn" 
+                            <button type="button" id="generateExplanationBtn" disabled
                                     class="px-4 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
                                 <i class="fas fa-lightbulb mr-2"></i>Generate Explanation
                             </button>
                         </div>
-                        <p class="text-sm text-gray-500 mt-1">We'll extract content and images from this page</p>
+                        <p class="text-sm text-gray-500 mt-1">
+                            <i class="fas fa-info-circle mr-1 text-blue-500"></i>
+                            Start with "Intelligent Scraping" to analyze the page, then generate copy and explanation
+                        </p>
+                    </div>
+
+                    <!-- Intelligent Scraping Status -->
+                    <div id="scrapingStatusSection" class="hidden">
+                        <label class="block text-sm font-medium text-gray-700 mb-2">
+                            <i class="fas fa-brain mr-2"></i>Intelligent Scraping Results
+                        </label>
+                        <div class="border border-gray-200 rounded-lg p-4 bg-gray-50">
+                            <div id="scrapingStatusContent" class="space-y-3">
+                                <!-- Scraping status will be populated here -->
+                            </div>
+                        </div>
                     </div>
 
                     <!-- Product Image Upload (Optional) -->

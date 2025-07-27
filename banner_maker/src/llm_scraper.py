@@ -20,7 +20,7 @@ import markdown
 import html2text
 from pydantic import BaseModel, Field
 
-from enhanced_scraper import EnhancedWebScraper
+from .enhanced_scraper import EnhancedWebScraper
 
 logger = logging.getLogger(__name__)
 

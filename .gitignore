@@ -5,3 +5,20 @@ test_output/
 banner_maker_env/
 .env
 venv/
+
+# Sensitive authentication files
+.canva_tokens.json
+*.json.backup
+
+# Temporary files
+preprocessed_*.txt
+llm_scraping_result.json
+
+# Upload directories
+uploads/
+temp/
+web_app/uploads/
+web_app/temp/
+
+# Demo and test output files
+demo_result_*.json

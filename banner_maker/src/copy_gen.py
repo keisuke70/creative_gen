@@ -19,7 +19,8 @@ def generate_copy_and_visual_prompts(
     text_content: str,
     title: str = "",
     description: str = "",
-    brand_context: str = ""
+    brand_context: str = "",
+    llm_extracted_data: Dict = None
 ) -> List[Dict]:
     """
     Generate 5 marketing copy variants with corresponding visual/background prompts using GPT-4.1
@@ -28,13 +29,59 @@ def generate_copy_and_visual_prompts(
     try:
         client = setup_gemini_client()
         
-        # Prepare context for copy generation
-        context = f"""
-        Website Title: {title}
-        Description: {description}
-        Page Content: {text_content[:800]}
-        Brand Context: {brand_context}
-        """.strip()
+        # Prepare enhanced context using LLM extracted data
+        if llm_extracted_data is None:
+            llm_extracted_data = {}
+            
+        # Build rich context from LLM extracted data
+        context_parts = [
+            f"Website Title: {title}",
+            f"Description: {description}"
+        ]
+        
+        # Add rich LLM extracted information
+        if llm_extracted_data.get('product_name'):
+            context_parts.append(f"Product Name: {llm_extracted_data['product_name']}")
+        
+        if llm_extracted_data.get('brand_name'):
+            context_parts.append(f"Brand: {llm_extracted_data['brand_name']}")
+            
+        if llm_extracted_data.get('product_description'):
+            context_parts.append(f"Product Description: {llm_extracted_data['product_description']}")
+            
+        if llm_extracted_data.get('key_features'):
+            features = llm_extracted_data['key_features']
+            if isinstance(features, list):
+                context_parts.append(f"Key Features: {', '.join(features)}")
+            else:
+                context_parts.append(f"Key Features: {features}")
+                
+        if llm_extracted_data.get('unique_selling_points'):
+            context_parts.append(f"Unique Selling Points: {llm_extracted_data['unique_selling_points']}")
+            
+        if llm_extracted_data.get('target_audience'):
+            context_parts.append(f"Target Audience: {llm_extracted_data['target_audience']}")
+            
+        if llm_extracted_data.get('price_info'):
+            context_parts.append(f"Price Information: {llm_extracted_data['price_info']}")
+            
+        if llm_extracted_data.get('call_to_action'):
+            context_parts.append(f"Call to Action: {llm_extracted_data['call_to_action']}")
+            
+        if llm_extracted_data.get('category'):
+            context_parts.append(f"Category: {llm_extracted_data['category']}")
+            
+        if llm_extracted_data.get('availability'):
+            context_parts.append(f"Availability: {llm_extracted_data['availability']}")
+            
+        # Fallback to basic content if no LLM data
+        if not any(llm_extracted_data.values()):
+            context_parts.append(f"Page Content: {text_content[:800]}")
+            
+        if brand_context:
+            context_parts.append(f"Brand Context: {brand_context}")
+            
+        context = "\n".join(context_parts)
         
         system_prompt = """君は日本のトップクラスのコピーライターだ。必ず日本語で、ユーザーのクリックを引き出す正確で競争力のある広告バナー向けコピーを作成すること。広告バナー画像に適切にオーバーレイできる2文以下の短い日本語センテンスを生成すること。出力は必ず日本語のみで行う。"""
         

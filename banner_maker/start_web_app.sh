@@ -23,9 +23,9 @@ if [ ! -d "../venv" ]; then
 fi
 
 # Check environment variables
-if [ -z "$OPENAI_API_KEY" ]; then
-    echo "❌ OPENAI_API_KEY environment variable not set"
-    echo "Please set it with: export OPENAI_API_KEY='your-api-key'"
+if [ -z "$GOOGLE_API_KEY" ]; then
+    echo "❌ GOOGLE_API_KEY environment variable not set"
+    echo "Please set it with: export GOOGLE_API_KEY='your-api-key'"
     exit 1
 fi
 
@@ -35,7 +35,7 @@ source ../venv/bin/activate
 
 # Start web app
 echo "🚀 Starting web application..."
-echo "📱 Web interface will be available at: http://localhost:5000"
+echo "📱 Web interface will be available at: http://127.0.0.1:5000"
 echo "🛑 Press Ctrl+C to stop the server"
 echo ""
 

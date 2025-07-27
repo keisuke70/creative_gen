@@ -11,15 +11,16 @@ from typing import Dict, List
 from urllib.parse import urlparse
 
 
-def generate_creative_explanation(text_content: str, title: str, description: str, url: str) -> Dict:
+def generate_creative_explanation(text_content: str, title: str, description: str, url: str, llm_extracted_data: Dict = None) -> Dict:
     """
-    Generate comprehensive creative explanation using scraped content
+    Generate comprehensive creative explanation using scraped content and LLM extracted data
     
     Args:
         text_content: Full text content from the landing page
         title: Page title
         description: Meta description
         url: Original URL for context
+        llm_extracted_data: Rich structured data extracted by LLM
         
     Returns:
         Dictionary containing structured explanation with insights
@@ -29,14 +30,74 @@ def generate_creative_explanation(text_content: str, title: str, description: st
     domain = urlparse(url).netloc.replace('www.', '')
     brand_context = _extract_brand_context(domain, title, text_content)
     
+    # Prepare enhanced context using LLM extracted data
+    if llm_extracted_data is None:
+        llm_extracted_data = {}
+    
+    # Build rich information for analysis
+    info_parts = [
+        f"- URL: {url}",
+        f"- タイトル: {title}",
+        f"- 説明: {description}"
+    ]
+    
+    # Add detailed LLM extracted information
+    if llm_extracted_data.get('product_name'):
+        info_parts.append(f"- 商品名: {llm_extracted_data['product_name']}")
+    
+    if llm_extracted_data.get('brand_name'):
+        info_parts.append(f"- ブランド名: {llm_extracted_data['brand_name']}")
+        
+    if llm_extracted_data.get('product_description'):
+        info_parts.append(f"- 商品説明: {llm_extracted_data['product_description']}")
+        
+    if llm_extracted_data.get('category'):
+        info_parts.append(f"- カテゴリ: {llm_extracted_data['category']}")
+        
+    if llm_extracted_data.get('key_features'):
+        features = llm_extracted_data['key_features']
+        if isinstance(features, list):
+            info_parts.append(f"- 主要機能: {', '.join(features)}")
+        else:
+            info_parts.append(f"- 主要機能: {features}")
+            
+    if llm_extracted_data.get('unique_selling_points'):
+        info_parts.append(f"- 独自の強み: {llm_extracted_data['unique_selling_points']}")
+        
+    if llm_extracted_data.get('target_audience'):
+        info_parts.append(f"- ターゲット層: {llm_extracted_data['target_audience']}")
+        
+    if llm_extracted_data.get('price_info'):
+        info_parts.append(f"- 価格情報: {llm_extracted_data['price_info']}")
+        
+    if llm_extracted_data.get('call_to_action'):
+        info_parts.append(f"- 呼びかけ: {llm_extracted_data['call_to_action']}")
+        
+    if llm_extracted_data.get('availability'):
+        info_parts.append(f"- 利用可能性: {llm_extracted_data['availability']}")
+        
+    if llm_extracted_data.get('reviews_sentiment'):
+        info_parts.append(f"- レビュー傾向: {llm_extracted_data['reviews_sentiment']}")
+        
+    if llm_extracted_data.get('specifications'):
+        specs = llm_extracted_data['specifications']
+        if isinstance(specs, dict):
+            specs_text = ', '.join([f"{k}: {v}" for k, v in specs.items()])
+            info_parts.append(f"- 仕様: {specs_text}")
+        else:
+            info_parts.append(f"- 仕様: {specs}")
+    
+    # Fallback to basic content if no LLM data
+    if not any(llm_extracted_data.values()):
+        info_parts.append(f"- コンテンツ: {text_content[:800]}...")
+    
+    page_info = "\n".join(info_parts)
+    
     # Generate the explanation using Gemini - Japanese prompt to ensure Japanese output
     prompt = f"""以下のランディングページを分析し、広告クリエイティブ制作のインサイトを提供してください。
 
 ページ情報:
-- URL: {url}
-- タイトル: {title}
-- 説明: {description}
-- コンテンツ: {text_content[:800]}...
+{page_info}
 
 以下の構成で分析結果を出力してください:
 
