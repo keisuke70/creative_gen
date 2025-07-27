@@ -1286,6 +1286,21 @@ class BannerMaker {
                         </div>
                         <p class="text-gray-700">${variant.text}</p>
                         <p class="text-xs text-gray-500 mt-1">${variant.tone}</p>
+                        ${variant.background_prompt ? `
+                            <div class="mt-3 p-3 bg-gray-50 rounded border-l-4 border-blue-500">
+                                <div class="flex items-center justify-between mb-1">
+                                    <span class="text-xs font-medium text-gray-600">
+                                        <i class="fas fa-palette mr-1"></i>Background Prompt
+                                    </span>
+                                    <button class="copy-bg-prompt-btn px-2 py-1 text-xs bg-green-500 text-white rounded hover:bg-green-600 transition-colors" 
+                                            data-copy-text="${variant.background_prompt.replace(/"/g, '&quot;')}"
+                                            title="Copy background prompt">
+                                        <i class="fas fa-copy"></i>
+                                    </button>
+                                </div>
+                                <p class="text-xs text-gray-600 leading-relaxed">${variant.background_prompt}</p>
+                            </div>
+                        ` : ''}
                     </div>
                 </label>
             `;
@@ -1301,6 +1316,9 @@ class BannerMaker {
                     // Copy to clipboard first
                     await this.copyToClipboard(variants[index].text, `${variants[index].type} copy`);
                     
+                    // Update background prompt immediately before saving
+                    this.showBackgroundPrompt(variants[index]);
+                    
                     // Save selection to backend
                     await this.selectCopyAndSave(index, false); // false = don't show additional success message since clipboard message was already shown
                 }
@@ -1315,6 +1333,17 @@ class BannerMaker {
                 e.stopPropagation();
                 const copyText = button.getAttribute('data-copy-text');
                 this.copyToClipboard(copyText, 'copy');
+            });
+        });
+
+        // Add event listeners for background prompt copy buttons
+        const bgPromptButtons = container.querySelectorAll('.copy-bg-prompt-btn');
+        bgPromptButtons.forEach(button => {
+            button.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const copyText = button.getAttribute('data-copy-text');
+                this.copyToClipboard(copyText, 'background prompt');
             });
         });
 
@@ -2542,7 +2571,7 @@ class BannerMaker {
             if (selectedCopy && selectedCopy.background_prompt && selectedCopy.background_prompt.trim()) {
                 // Use the original background prompt without modifications
                 prompt = selectedCopy.background_prompt.trim();
-                console.log('✅ Using original background prompt without copy context:', prompt);
+                console.log('✅ Using original background prompt for selected copy:', prompt);
             } else {
                 // Use a generic professional background prompt
                 prompt = `プロフェッショナルなマーケティング背景を作成してください。
@@ -2555,10 +2584,22 @@ class BannerMaker {
 - 文字、ロゴ、特定のブランド要素は含めない
 - クリーンでモダンなデザイン`;
                 
-                console.log('✅ Using generic professional background prompt:', prompt);
+                console.log('✅ Using generic professional background prompt (no specific prompt available)');
             }
             
+            // Set the textarea value and trigger visual feedback
             promptText.value = prompt;
+            
+            // Add visual feedback to show the textarea was updated
+            promptText.style.backgroundColor = '#f0f9ff';
+            setTimeout(() => {
+                promptText.style.backgroundColor = '';
+            }, 500);
+            
+            // Scroll the background prompt into view so user can see the change
+            promptSection.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            
+            console.log('✅ Background prompt updated in textarea');
 
         } else {
             console.error('❌ Missing elements - promptSection:', promptSection, 'promptText:', promptText);
@@ -2608,9 +2649,12 @@ class BannerMaker {
             statusDisplay.className = 'w-full px-4 py-3 border border-green-300 rounded-lg bg-green-50';
         }
         
-        // Show background prompt from first copy variant if available
-        if (this.copyVariants && this.copyVariants.length > 0) {
+        // Only set background prompt from first copy if no copy is already selected
+        if (this.copyVariants && this.copyVariants.length > 0 && !this.selectedCopy) {
+            console.log('🎯 Setting initial background prompt from first copy variant');
             this.showBackgroundPrompt(this.copyVariants[0]);
+        } else if (this.selectedCopy) {
+            console.log('🎯 Copy already selected, keeping current background prompt for:', this.selectedCopy.type);
         }
     }
 
