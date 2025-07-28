@@ -531,7 +531,7 @@ class BannerMaker {
         if (imageItem) {
             // Update the preview with uploaded image and remove loading state
             imageItem.innerHTML = `
-                <img src="/uploads/${imageData.path.split('/').pop()}" 
+                <img src="/uploads/${this.getFilename(imageData.path)}" 
                      alt="${imageData.name}" 
                      class="w-full h-24 object-cover rounded-lg border border-gray-300">
                 <div class="absolute top-1 right-1">
@@ -583,6 +583,17 @@ class BannerMaker {
                 loadingOverlay.remove();
             }
         }
+    }
+
+    // Helper method to extract filename from path (cross-platform compatible)
+    getFilename(path) {
+        if (!path) return '';
+        // Handle both Unix (/) and Windows (\) path separators
+        const unixParts = path.split('/');
+        const windowsParts = path.split('\\');
+        // Use the split that results in more parts (more specific path)
+        const parts = unixParts.length > windowsParts.length ? unixParts : windowsParts;
+        return parts[parts.length - 1];
     }
 
     async clearAllImages() {
@@ -647,7 +658,7 @@ class BannerMaker {
         
         // Generate preview HTML for existing grid (this is used for single additions or refreshes)
         const gridHTML = this.uploadedImages.map((imageData, index) => {
-            const imagePath = imageData.path.startsWith('/uploads/') ? imageData.path : `/uploads/${imageData.path.split('/').pop()}`;
+            const imagePath = imageData.path.startsWith('/uploads/') ? imageData.path : `/uploads/${this.getFilename(imageData.path)}`;
             console.log('Generating grid item for image:', imagePath, 'name:', imageData.name);
             
             return `

@@ -507,7 +507,7 @@ def upload_product_image():
             
             return jsonify({
                 'success': True,
-                'filepath': filepath,
+                'filepath': unique_filename,
                 'filename': unique_filename
             })
         else:
@@ -614,7 +614,7 @@ def proxy_image():
             
             return jsonify({
                 'success': True,
-                'filepath': filepath,
+                'filepath': unique_filename,
                 'filename': unique_filename,
                 'is_extracted_image': True  # Mark as extracted image for cleanup
             })
