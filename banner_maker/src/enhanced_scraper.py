@@ -574,10 +574,13 @@ class EnhancedWebScraper:
         # Wait for images to load using generic strategies
         await self._wait_for_images_to_load(page)
         
-        images = await page.evaluate("""
+        # Debug: Get detailed image information for troubleshooting
+        debug_info = await page.evaluate("""
             () => {
                 const imgs = Array.from(document.querySelectorAll('img'));
-                return imgs.map(img => {
+                const totalImages = imgs.length;
+                
+                const imageDetails = imgs.map(img => {
                     const rect = img.getBoundingClientRect();
                     return {
                         src: img.src,
@@ -590,19 +593,62 @@ class EnhancedWebScraper:
                         area: img.naturalWidth * img.naturalHeight,
                         isVisible: rect.width > 0 && rect.height > 0,
                         loading: img.loading || 'eager',
-                        className: img.className || ''
+                        className: img.className || '',
+                        complete: img.complete
                     };
-                })
-                .filter(img => 
-                    img.area >= 10000 && // Minimum 100x100
-                    img.isVisible &&
-                    !img.src.includes('data:image') &&
-                    !img.className.includes('icon') &&
-                    !img.className.includes('logo')
-                )
-                .sort((a, b) => b.area - a.area);
+                });
+                
+                const validImages = imageDetails.filter(img => {
+                    // More lenient filtering for cross-platform compatibility
+                    const hasValidSize = img.area >= 10000; // Minimum 100x100
+                    const notDataUri = !img.src.includes('data:image');
+                    const notIcon = !img.className.includes('icon');
+                    const notLogo = !img.className.includes('logo');
+                    const hasValidSrc = img.src && img.src.startsWith('http');
+                    
+                    // More flexible visibility check - accept if either display or natural dimensions are valid
+                    const isVisuallyValid = img.isVisible || (img.naturalWidth > 0 && img.naturalHeight > 0);
+                    
+                    return hasValidSize && notDataUri && notIcon && notLogo && hasValidSrc && isVisuallyValid;
+                });
+                
+                return {
+                    totalFound: totalImages,
+                    afterFiltering: validImages.length,
+                    validImages: validImages.sort((a, b) => b.area - a.area),
+                    sampleInvalid: imageDetails.filter(img => {
+                        const hasValidSize = img.area >= 10000;
+                        const notDataUri = !img.src.includes('data:image');
+                        const notIcon = !img.className.includes('icon');
+                        const notLogo = !img.className.includes('logo');
+                        const hasValidSrc = img.src && img.src.startsWith('http');
+                        const isVisuallyValid = img.isVisible || (img.naturalWidth > 0 && img.naturalHeight > 0);
+                        
+                        return !(hasValidSize && notDataUri && notIcon && notLogo && hasValidSrc && isVisuallyValid);
+                    }).slice(0, 5) // First 5 invalid images for debugging
+                };
             }
         """)
+        
+        logger.info(f"Image extraction debug for {url}:")
+        logger.info(f"  Total images found: {debug_info['totalFound']}")
+        logger.info(f"  After filtering: {debug_info['afterFiltering']}")
+        if debug_info['afterFiltering'] == 0 and debug_info['totalFound'] > 0:
+            logger.warning(f"  All {debug_info['totalFound']} images were filtered out!")
+            for i, invalid in enumerate(debug_info['sampleInvalid'][:5]):
+                src_display = invalid['src'][:60] + '...' if len(invalid['src']) > 60 else invalid['src']
+                logger.warning(f"    Sample filtered image {i+1}: {src_display}")
+                logger.warning(f"      Size: {invalid['naturalWidth']}x{invalid['naturalHeight']} (area: {invalid['area']})")
+                logger.warning(f"      Display: {invalid['displayWidth']}x{invalid['displayHeight']}")
+                logger.warning(f"      Visible: {invalid['isVisible']}, Complete: {invalid['complete']}")
+                logger.warning(f"      Class: {invalid['className']}, Loading: {invalid['loading']}")
+        elif debug_info['afterFiltering'] > 0:
+            logger.info(f"  Successfully found {debug_info['afterFiltering']} valid images")
+            for i, valid in enumerate(debug_info['validImages'][:3]):
+                src_display = valid['src'][:60] + '...' if len(valid['src']) > 60 else valid['src']
+                logger.info(f"    Valid image {i+1}: {src_display} ({valid['naturalWidth']}x{valid['naturalHeight']})")
+        
+        images = debug_info['validImages']
         
         # Download the largest viable image
         hero_image_data = None
