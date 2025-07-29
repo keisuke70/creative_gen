@@ -8,7 +8,10 @@ from PIL import Image
 import logging
 
 # Import enhanced scraper
-from .enhanced_scraper import EnhancedWebScraper, scrape_landing_page_enhanced
+try:
+    from .enhanced_scraper import EnhancedWebScraper, scrape_landing_page_enhanced
+except ImportError:
+    from enhanced_scraper import EnhancedWebScraper, scrape_landing_page_enhanced
 
 logger = logging.getLogger(__name__)
 

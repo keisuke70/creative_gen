@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 # Import banner maker modules
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.append(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'src'))
 
 from src.lp_scrape import scrape_landing_page, get_page_title_and_description
 from src.llm_scraper import scrape_page_with_llm
@@ -1065,7 +1066,80 @@ def extract_images():
 
 
 def extract_images_from_url(url: str) -> list:
-    """Extract images from a webpage URL"""
+    """Extract images from a webpage URL using enhanced scraper with dynamic content support"""
+    try:
+        # Use enhanced scraper for dynamic content support
+        import asyncio
+        
+        async def scrape_images_async():
+            from enhanced_scraper import EnhancedWebScraper
+            scraper = EnhancedWebScraper()
+            # Use minimal scroll attempts for speed - just 1 attempt
+            result = await scraper.scrape_page_comprehensive(url, include_images=True, max_scroll_attempts=1)
+            return result.get('images', [])
+        
+        # Run async scraper with proper event loop handling
+        # Try to use existing loop first
+        try:
+            loop = asyncio.get_running_loop()
+            # If there's already a running loop, create a new thread for this
+            import concurrent.futures
+            import threading
+            
+            def run_in_new_loop():
+                new_loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(new_loop)
+                try:
+                    return new_loop.run_until_complete(scrape_images_async())
+                finally:
+                    new_loop.close()
+            
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                future = executor.submit(run_in_new_loop)
+                raw_images = future.result(timeout=120)  # 2 minute timeout
+                
+        except RuntimeError:
+            # No running loop, create new one
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                raw_images = loop.run_until_complete(scrape_images_async())
+            finally:
+                loop.close()
+        
+        # Convert to web UI format
+        images = []
+        for img in raw_images:
+            image_info = {
+                'src': img.get('src', ''),
+                'alt': img.get('alt', ''),
+                'title': img.get('title', ''),
+                'width': img.get('naturalWidth', 0),
+                'height': img.get('naturalHeight', 0),
+                'size': None,  # Enhanced scraper doesn't provide file size
+                'type': 'image/unknown',  # Enhanced scraper doesn't provide content type
+                'displayWidth': img.get('displayWidth', 0),
+                'displayHeight': img.get('displayHeight', 0),
+                'area': img.get('area', 0),
+                'isVisible': img.get('isVisible', True)
+            }
+            images.append(image_info)
+        
+        # Images from enhanced scraper are already sorted by area (largest first)
+        # Limit to first 30 images to show more results while keeping reasonable performance
+        logger.info(f"Enhanced scraper found {len(images)} images for {url}")
+        return images[:30]
+            
+    except Exception as e:
+        logger.error(f"Enhanced scraper failed for {url}: {e}", exc_info=True)
+        logger.info("Falling back to basic requests-based image extraction...")
+        
+        # Fallback to basic approach
+        return extract_images_from_url_fallback(url)
+
+
+def extract_images_from_url_fallback(url: str) -> list:
+    """Fallback image extraction using basic requests/HTML parsing"""
     try:
         # Send request to get the HTML
         headers = {
@@ -1102,73 +1176,28 @@ def extract_images_from_url(url: str) -> list:
             width = img.attributes.get('width')
             height = img.attributes.get('height')
             
-            # Try to get image dimensions and size
-            try:
-                img_response = requests.head(src, headers=headers, timeout=5)
-                content_length = img_response.headers.get('content-length')
-                content_type = img_response.headers.get('content-type', '')
-                
-                # Filter out non-image content types
-                if not content_type.startswith('image/'):
-                    continue
-                
-                # Try to get actual image dimensions if not specified
-                if not width or not height:
-                    try:
-                        img_data_response = requests.get(src, headers=headers, timeout=5, stream=True)
-                        img_data_response.raise_for_status()
-                        
-                        # Read only first chunk to get dimensions
-                        img_data = b''
-                        for chunk in img_data_response.iter_content(chunk_size=8192):
-                            img_data += chunk
-                            if len(img_data) > 50000:  # Limit to 50KB for dimension checking
-                                break
-                        
-                        # Try to get dimensions using PIL
-                        try:
-                            with Image.open(io.BytesIO(img_data)) as pil_image:
-                                width, height = pil_image.size
-                        except Exception:
-                            pass
-                    except Exception:
-                        pass
-                
-                # Skip very small images (likely icons/thumbnails)
-                if width and height:
-                    try:
-                        w, h = int(width), int(height)
-                        if w < 100 or h < 100:
-                            continue
-                    except (ValueError, TypeError):
-                        pass
-                
-                image_info = {
-                    'src': src,
-                    'alt': alt,
-                    'title': title,
-                    'width': width,
-                    'height': height,
-                    'size': content_length,
-                    'type': content_type
-                }
-                
-                images.append(image_info)
-                
-            except requests.exceptions.RequestException:
-                # If we can't validate the image, still include it but with basic info
-                image_info = {
-                    'src': src,
-                    'alt': alt,
-                    'title': title,
-                    'width': width,
-                    'height': height,
-                    'size': None,
-                    'type': 'image/unknown'
-                }
-                images.append(image_info)
+            # Skip very small images without validation (faster fallback)
+            if width and height:
+                try:
+                    w, h = int(width), int(height)
+                    if w < 100 or h < 100:
+                        continue
+                except (ValueError, TypeError):
+                    pass
+            
+            image_info = {
+                'src': src,
+                'alt': alt,
+                'title': title,
+                'width': width or 0,
+                'height': height or 0,
+                'size': None,
+                'type': 'image/unknown'
+            }
+            
+            images.append(image_info)
         
-        # Sort images by size (largest first) and limit to reasonable number
+        # Basic sorting by width*height if available
         images_with_size = []
         images_without_size = []
         
@@ -1186,12 +1215,12 @@ def extract_images_from_url(url: str) -> list:
         images_with_size.sort(key=lambda x: x[1], reverse=True)
         sorted_images = [img for img, _ in images_with_size] + images_without_size
         
-        # Limit to first 20 images to avoid overwhelming the UI
+        logger.info(f"Fallback scraper found {len(sorted_images)} images for {url}")
         return sorted_images[:20]
         
     except Exception as e:
-        logger.error(f"Error extracting images from {url}: {e}", exc_info=True)
-        raise Exception(f"Failed to extract images: {str(e)}")
+        logger.error(f"Fallback image extraction also failed for {url}: {e}", exc_info=True)
+        return []
 
 
 def run_generation_async(session_id: str, url: str, mode: str, banner_size: str, product_image_path: Optional[str] = None):

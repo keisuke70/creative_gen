@@ -20,7 +20,10 @@ import markdown
 import html2text
 from pydantic import BaseModel, Field
 
-from .enhanced_scraper import EnhancedWebScraper
+try:
+    from .enhanced_scraper import EnhancedWebScraper
+except ImportError:
+    from enhanced_scraper import EnhancedWebScraper
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +39,7 @@ class ExtractedContent(BaseModel):
     unique_selling_points: Optional[str] = Field(default=None, description="特別または異なる点、独自の強み")
     call_to_action: Optional[str] = Field(default=None, description="ページがユーザーに求める主要なアクション")
     availability: Optional[str] = Field(default=None, description="在庫状況、利用可能性情報")
-    specifications: Optional[Dict[str, str]] = Field(default=None, description="技術仕様または詳細属性")
+    specifications: Optional[str] = Field(default=None, description="技術仕様または詳細属性")
     reviews_sentiment: Optional[str] = Field(default=None, description="レビューが存在する場合の全体的な感情")
 
 class LLMWebScraper(EnhancedWebScraper):
@@ -258,7 +261,7 @@ class LLMWebScraper(EnhancedWebScraper):
         return ""
     
     async def _get_html_with_playwright_quick(self, url: str) -> str:
-        """Quick Playwright attempt - fail fast if anti-bot detected (5s max)"""
+        """Quick Playwright attempt with generic dynamic content handling"""
         from playwright.async_api import async_playwright
         
         async with async_playwright() as p:
@@ -280,9 +283,11 @@ class LLMWebScraper(EnhancedWebScraper):
             page = await context.new_page()
             
             try:
-                # VERY quick single attempt - fail fast if anti-bot (5s max total)
-                await page.goto(url, wait_until="domcontentloaded", timeout=5000)  # 5s max
-                await page.wait_for_timeout(1000)  # Brief wait for dynamic content
+                # Strategy 1: Try domcontentloaded first (more reliable)
+                await page.goto(url, wait_until="domcontentloaded", timeout=15000)
+                
+                # Wait for dynamic content using multiple strategies
+                await self._wait_for_dynamic_content_generic(page)
                 
                 html_content = await page.content()
                 if len(html_content) > 1000:
@@ -290,11 +295,50 @@ class LLMWebScraper(EnhancedWebScraper):
                     return html_content
                     
             except Exception as e:
-                logger.info(f"Quick Playwright failed in 5s (expected for anti-bot): {e}")
+                logger.info(f"Quick Playwright failed: {e}")
             finally:
                 await browser.close()
         
         return ""
+    
+    async def _wait_for_dynamic_content_generic(self, page) -> None:
+        """Fast dynamic content waiting - optimized for speed"""
+        try:
+            # Strategy 1: Very quick networkidle check
+            try:
+                await page.wait_for_load_state('networkidle', timeout=2000)  # Much shorter
+                logger.info("Network idle achieved quickly")
+                return
+            except Exception:
+                logger.info("Quick network idle timeout - using fast fallback")
+            
+            # Strategy 2: Just wait for document ready
+            try:
+                await page.wait_for_function(
+                    "document.readyState === 'complete'", 
+                    timeout=2000  # Much shorter
+                )
+                logger.info("Document complete state achieved")
+            except Exception:
+                logger.info("Document ready timeout")
+            
+            # Strategy 3: Quick loading indicator check
+            try:
+                await page.wait_for_function("""
+                    () => {
+                        const loadingElements = document.querySelectorAll('.loading, .spinner');
+                        return loadingElements.length === 0 || 
+                               Array.from(loadingElements).every(el => el.style.display === 'none');
+                    }
+                """, timeout=2000)  # Much shorter
+                logger.info("Loading indicators cleared")
+            except Exception:
+                pass
+            
+        except Exception as e:
+            logger.info(f"Dynamic content strategies completed: {e}")
+            # Much shorter final wait
+            await page.wait_for_timeout(1000)
     
     async def _get_html_with_playwright(self, url: str) -> str:
         """Playwright approach with maximum stealth (backup method)"""
@@ -326,9 +370,11 @@ class LLMWebScraper(EnhancedWebScraper):
             page = await context.new_page()
             
             try:
-                # Single attempt with longer timeout
-                await page.goto(url, wait_until="domcontentloaded", timeout=60000)
-                await page.wait_for_timeout(3000)
+                # Load page with domcontentloaded (more reliable than networkidle)
+                await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+                
+                # Wait for dynamic content with generic strategies
+                await self._wait_for_dynamic_content_generic(page)
                 
                 html_content = await page.content()
                 if len(html_content) > 1000:
@@ -458,7 +504,7 @@ URL: {url}
                     "unique_selling_points": {"type": "string", "description": "特別または異なる点、独自の強み"},
                     "call_to_action": {"type": "string", "description": "ページがユーザーに求める主要なアクション"},
                     "availability": {"type": "string", "description": "在庫状況、利用可能性情報"},
-                    "specifications": {"type": "object", "description": "技術仕様または詳細属性"},
+                    "specifications": {"type": "string", "description": "技術仕様または詳細属性"},
                     "reviews_sentiment": {"type": "string", "description": "レビューが存在する場合の全体的な感情"}
                 }
             }

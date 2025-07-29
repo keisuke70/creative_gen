@@ -13,7 +13,10 @@ from playwright.async_api import async_playwright, Page, Browser
 from selectolax.parser import HTMLParser
 import logging
 
-from .scraper_config import ScraperConfig
+try:
+    from .scraper_config import ScraperConfig
+except ImportError:
+    from scraper_config import ScraperConfig
 
 logger = logging.getLogger(__name__)
 
@@ -318,19 +321,20 @@ class EnhancedWebScraper:
             try:
                 logger.info(f"Loading page attempt {attempt + 1}/{max_retries}: {url}")
                 
-                # Random delay to mimic human behavior
-                await page.wait_for_timeout(1000 + (attempt * 500))
+                # Minimal delay for speed optimization
+                if attempt > 0:  # Only delay on retry attempts
+                    await page.wait_for_timeout(500)
                 
-                # Try different loading strategies with shorter timeouts to fail fast
+                # Fast loading strategy - prioritize speed over perfection
                 if attempt == 0:
-                    # First attempt: Normal load with shorter timeout
-                    await page.goto(url, wait_until="domcontentloaded", timeout=15000)
+                    # First attempt: Just wait for DOM content loaded (fast)
+                    await page.goto(url, wait_until="domcontentloaded", timeout=10000)
                 elif attempt == 1:
-                    # Second attempt: Load without waiting for everything
-                    await page.goto(url, wait_until="commit", timeout=10000)
+                    # Second attempt: Even more minimal wait
+                    await page.goto(url, wait_until="commit", timeout=8000)
                 else:
-                    # Final attempt: Just navigate with minimal timeout
-                    await page.goto(url, timeout=8000)
+                    # Final attempt: Just navigate
+                    await page.goto(url, timeout=5000)
                 
                 # Check if page loaded successfully
                 page_title = await page.title()
@@ -368,17 +372,22 @@ class EnhancedWebScraper:
         await page.wait_for_timeout(2000)
 
     async def _handle_dynamic_content_loading(self, page: Page, max_attempts: int) -> None:
-        """Handle infinite scroll and lazy-loaded content"""
+        """Handle infinite scroll and lazy-loaded content - fast version"""
         
-        for attempt in range(max_attempts):
+        # Minimal wait for initial content to load
+        await page.wait_for_timeout(1000)
+        
+        # Quick scroll to trigger any lazy loading - limit attempts for speed
+        scroll_attempts = min(max_attempts, 2)  # Max 2 attempts
+        for attempt in range(scroll_attempts):
             # Get initial page height
             prev_height = await page.evaluate("document.body.scrollHeight")
             
             # Scroll to bottom
             await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
             
-            # Wait for potential new content
-            await page.wait_for_timeout(1500)
+            # Quick wait for new content - much shorter timeout
+            await page.wait_for_timeout(1000)
             
             # Check if new content loaded
             new_height = await page.evaluate("document.body.scrollHeight")
@@ -388,7 +397,57 @@ class EnhancedWebScraper:
                 
         # Scroll back to top for consistent extraction
         await page.evaluate("window.scrollTo(0, 0)")
-        await page.wait_for_timeout(500)
+        await page.wait_for_timeout(300)
+
+    async def _wait_for_network_idle(self, page: Page, timeout: int = 10000) -> None:
+        """Wait for network to be idle using generic Playwright mechanisms"""
+        try:
+            # Wait for network to be mostly idle (no more than 2 requests in 500ms)
+            await page.wait_for_load_state('networkidle', timeout=timeout)
+            logger.info("Network idle state achieved")
+        except Exception as e:
+            logger.warning(f"Network idle timeout ({timeout}ms): {e}")
+            # Fallback: wait for DOM ready state
+            try:
+                await page.wait_for_function(
+                    "document.readyState === 'complete'", 
+                    timeout=min(timeout // 2, 5000)
+                )
+                logger.info("Document ready state achieved")
+            except Exception as e2:
+                logger.warning(f"Document ready state timeout: {e2}")
+                # Final fallback: brief fixed wait
+                await page.wait_for_timeout(2000)
+
+    async def _wait_for_images_to_load(self, page: Page) -> None:
+        """Fast image loading strategy - optimized for speed"""
+        try:
+            # Quick check for already loaded images
+            await page.wait_for_function("""
+                () => {
+                    const images = Array.from(document.querySelectorAll('img'));
+                    return images.length === 0 || images.filter(img => 
+                        img.complete && img.naturalWidth > 0
+                    ).length >= Math.max(5, images.length * 0.6);  // Accept 60% loaded
+                }
+            """, timeout=3000)  # Much shorter timeout
+            logger.info("Initial images loaded")
+            
+        except Exception:
+            logger.info("Quick image check timeout - doing fast lazy loading")
+            
+            # Very fast lazy loading check
+            try:
+                # Quick scroll to bottom and back
+                await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                await page.wait_for_timeout(800)   # Even shorter
+                await page.evaluate("window.scrollTo(0, 0)")
+                await page.wait_for_timeout(300)   # Brief stabilization
+                
+                logger.info("Fast lazy loading completed")
+                    
+            except Exception as e:
+                logger.info(f"Fast lazy loading completed: {e}")
 
     async def _extract_comprehensive_text(self, page: Page, url: str) -> str:
         """
@@ -510,7 +569,10 @@ class EnhancedWebScraper:
         return text_content or ""
     
     async def _extract_images_enhanced(self, page: Page, url: str) -> Tuple[List[Dict], Optional[bytes]]:
-        """Enhanced image extraction with better filtering and metadata"""
+        """Enhanced image extraction with dynamic content waiting"""
+        
+        # Wait for images to load using generic strategies
+        await self._wait_for_images_to_load(page)
         
         images = await page.evaluate("""
             () => {
