@@ -26,18 +26,18 @@ logger = logging.getLogger(__name__)
 
 class ExtractedContent(BaseModel):
     """Pydantic model for structured content extraction"""
-    product_name: Optional[str] = Field(default=None, description="Main product or service name")
-    product_description: Optional[str] = Field(default=None, description="Detailed description of the product/service")
-    key_features: Optional[List[str]] = Field(default=None, description="List of main features or benefits")
-    price_info: Optional[str] = Field(default=None, description="Price, cost, or pricing information")
-    brand_name: Optional[str] = Field(default=None, description="Brand or company name")
-    category: Optional[str] = Field(default=None, description="Product category or type")
-    target_audience: Optional[str] = Field(default=None, description="Who this product/service is for")
-    unique_selling_points: Optional[str] = Field(default=None, description="What makes this special or different")
-    call_to_action: Optional[str] = Field(default=None, description="Main action the page wants users to take")
-    availability: Optional[str] = Field(default=None, description="Stock status, availability information")
-    specifications: Optional[Dict[str, str]] = Field(default=None, description="Technical specs or detailed attributes")
-    reviews_sentiment: Optional[str] = Field(default=None, description="General sentiment from reviews if present")
+    product_name: Optional[str] = Field(default=None, description="メイン商品またはサービス名")
+    product_description: Optional[str] = Field(default=None, description="商品・サービスの詳細説明")
+    key_features: Optional[List[str]] = Field(default=None, description="主要機能やベネフィットのリスト")
+    price_info: Optional[str] = Field(default=None, description="価格、コスト、料金情報")
+    brand_name: Optional[str] = Field(default=None, description="ブランドまたは企業名")
+    category: Optional[str] = Field(default=None, description="商品カテゴリまたは種類")
+    target_audience: Optional[str] = Field(default=None, description="この商品・サービスの対象ユーザー")
+    unique_selling_points: Optional[str] = Field(default=None, description="特別または異なる点、独自の強み")
+    call_to_action: Optional[str] = Field(default=None, description="ページがユーザーに求める主要なアクション")
+    availability: Optional[str] = Field(default=None, description="在庫状況、利用可能性情報")
+    specifications: Optional[Dict[str, str]] = Field(default=None, description="技術仕様または詳細属性")
+    reviews_sentiment: Optional[str] = Field(default=None, description="レビューが存在する場合の全体的な感情")
 
 class LLMWebScraper(EnhancedWebScraper):
     """Enhanced web scraper that uses LLM for intelligent content extraction"""
@@ -433,14 +433,14 @@ class LLMWebScraper(EnhancedWebScraper):
         
         # Create the prompt for structured extraction
         prompt = f"""
-Analyze the following webpage content and extract relevant information.
+以下のウェブページコンテンツを分析して、関連する情報を抽出してください。
 
 URL: {url}
 
-WEBPAGE CONTENT:
+ウェブページコンテンツ:
 {content}
 
-Extract information about the product, service, or content from this page. Be precise and factual - only extract information that is clearly stated in the content.
+このページから商品、サービス、またはコンテンツに関する情報を抽出してください。正確で事実に基づいて - コンテンツに明確に記載されている情報のみを抽出してください。回答は必ず日本語で行ってください。
 """
         
         try:
@@ -448,17 +448,18 @@ Extract information about the product, service, or content from this page. Be pr
             json_schema = {
                 "type": "object",
                 "properties": {
-                    "product_name": {"type": "string", "description": "Main product or service name"},
-                    "product_description": {"type": "string", "description": "Detailed description of the product/service"},
-                    "key_features": {"type": "array", "items": {"type": "string"}, "description": "List of main features or benefits"},
-                    "price_info": {"type": "string", "description": "Price, cost, or pricing information"},
-                    "brand_name": {"type": "string", "description": "Brand or company name"},
-                    "category": {"type": "string", "description": "Product category or type"},
-                    "target_audience": {"type": "string", "description": "Who this product/service is for"},
-                    "unique_selling_points": {"type": "string", "description": "What makes this special or different"},
-                    "call_to_action": {"type": "string", "description": "Main action the page wants users to take"},
-                    "availability": {"type": "string", "description": "Stock status, availability information"},
-                    "reviews_sentiment": {"type": "string", "description": "General sentiment from reviews if present"}
+                    "product_name": {"type": "string", "description": "メイン商品またはサービス名"},
+                    "product_description": {"type": "string", "description": "商品・サービスの詳細説明"},
+                    "key_features": {"type": "array", "items": {"type": "string"}, "description": "主要機能やベネフィットのリスト"},
+                    "price_info": {"type": "string", "description": "価格、コスト、料金情報"},
+                    "brand_name": {"type": "string", "description": "ブランドまたは企業名"},
+                    "category": {"type": "string", "description": "商品カテゴリまたは種類"},
+                    "target_audience": {"type": "string", "description": "この商品・サービスの対象ユーザー"},
+                    "unique_selling_points": {"type": "string", "description": "特別または異なる点、独自の強み"},
+                    "call_to_action": {"type": "string", "description": "ページがユーザーに求める主要なアクション"},
+                    "availability": {"type": "string", "description": "在庫状況、利用可能性情報"},
+                    "specifications": {"type": "object", "description": "技術仕様または詳細属性"},
+                    "reviews_sentiment": {"type": "string", "description": "レビューが存在する場合の全体的な感情"}
                 }
             }
             
