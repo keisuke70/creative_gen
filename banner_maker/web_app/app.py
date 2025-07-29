@@ -1073,7 +1073,16 @@ def extract_images_from_url(url: str) -> list:
         
         async def scrape_images_async():
             from enhanced_scraper import EnhancedWebScraper
-            scraper = EnhancedWebScraper()
+            from scraper_config import ScraperConfig
+            
+            # Create config that skips platform-specific selectors for web app (we only need images)
+            class WebAppScraperConfig(ScraperConfig):
+                def get_platform_selectors(self, url: str):
+                    # Always return empty list for web app - we don't need site-specific text extraction
+                    return []
+            
+            config = WebAppScraperConfig()
+            scraper = EnhancedWebScraper(config)
             # Use minimal scroll attempts for speed - just 1 attempt
             result = await scraper.scrape_page_comprehensive(url, include_images=True, max_scroll_attempts=1)
             return result.get('images', [])
